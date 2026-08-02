@@ -1,4 +1,4 @@
-const CACHE = 'yakult-stock-v2';
+const CACHE = 'sth-stock-v3';
 const ASSETS = [
   './',
   './index.html',
