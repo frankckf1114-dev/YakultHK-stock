@@ -1,0 +1,1852 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="存貨管理">
+  <meta name="theme-color" content="#E21530">
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+  <title>存貨管理</title>
+  <link rel="manifest" href="./manifest.json">
+  <style>
+    :root {
+      --primary: #E21530;
+      --primary-dark: #B81028;
+      --primary-light: #F1728F;
+      --bg: #f8f5f5;
+      --card: #ffffff;
+      --text: #222;
+      --muted: #666;
+      --border: #e0e0e0;
+      --success: #28a745;
+      --warning: #ff9800;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding-bottom: 80px;
+    }
+    header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: white;
+      padding: 14px 16px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 12px rgba(226,21,48,0.35);
+    }
+    header .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header .logo {
+      width: 42px;
+      height: 42px;
+      flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    header .subtitle {
+      font-size: 0.78rem;
+      opacity: 0.92;
+      margin-top: 2px;
+      letter-spacing: 0.02em;
+    }
+    header .tagline {
+      font-size: 0.7rem;
+      opacity: 0.85;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255,255,255,0.25);
+    }
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 12px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--primary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    select, input[type="number"], input[type="text"], input[type="date"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 1rem;
+      background: #fff;
+      -webkit-appearance: none;
+    }
+    select:focus, input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(230,0,18,0.15);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .row-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .product-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      background: #fafafa;
+    }
+    .product-name {
+      font-weight: 700;
+      font-size: 1rem;
+      margin-bottom: 10px;
+      color: var(--primary-dark);
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+    }
+    .info-row .label { color: var(--muted); }
+    .info-row .value { font-weight: 600; }
+    .sold {
+      background: #fff3e0;
+      color: #e65100;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .suggest {
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .price-note {
+      font-size: 0.8rem;
+      color: var(--warning);
+      margin-top: 6px;
+      padding: 6px 8px;
+      background: #fff8e1;
+      border-radius: 6px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      width: 100%;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary:active { background: var(--primary-dark); }
+    .btn-secondary {
+      background: #eee;
+      color: var(--text);
+    }
+    .btn-secondary:active { background: #ddd; }
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+    .btn-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .btn-group-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .tabs {
+      display: flex;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      font-weight: 600;
+      font-size: 0.9rem;
+      background: white;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .tab.active {
+      background: var(--primary);
+      color: white;
+    }
+    .hidden { display: none !important; }
+    .history-item {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .history-date { color: var(--primary); }
+    .history-detail {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+    }
+    .toast {
+      position: fixed;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 30px;
+      font-size: 0.9rem;
+      z-index: 200;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+    .footer-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      border-top: 1px solid var(--border);
+      display: flex;
+      padding: 8px;
+      z-index: 100;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+    }
+    .footer-nav button {
+      flex: 1;
+      background: none;
+      border: none;
+      padding: 8px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      cursor: pointer;
+    }
+    .footer-nav button.active { color: var(--primary); }
+    .footer-nav .icon { font-size: 1.3rem; }
+    .badge {
+      display: inline-block;
+      background: var(--primary);
+      color: white;
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: 4px;
+    }
+    .store-select-wrap {
+      position: relative;
+    }
+    .filter-input {
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-row">
+      <svg class="logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="22" y="8" width="20" height="6" rx="2" fill="#fff"/>
+        <rect x="20" y="14" width="24" height="42" rx="6" fill="#fff"/>
+        <rect x="24" y="20" width="16" height="28" rx="3" fill="#E21530"/>
+        <text x="32" y="38" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="Arial,sans-serif">Y</text>
+        <ellipse cx="32" cy="56" rx="10" ry="3" fill="#fff" opacity="0.9"/>
+      </svg>
+      <div>
+        <h1>存貨管理</h1>
+        <div class="subtitle">Yakult HK · 每日落貨記錄</div>
+      </div>
+    </div>
+    <div class="tagline">每瓶超過 100 億個乳酸菌代田株 · 香港製造</div>
+  </header>
+
+  <div id="installBanner" class="card" style="display:none; margin:12px; background:#fff5f5; border:1px solid #ffc9c9;">
+    <div style="font-weight:600; color:var(--primary); margin-bottom:6px;">📲 加到手機主畫面</div>
+    <div style="font-size:0.85rem; color:var(--muted); margin-bottom:10px;">
+      安裝後可像 App 一樣使用，圖標為益力多樽。
+    </div>
+    <button class="btn btn-primary" id="btnInstall" style="display:none;" onclick="triggerInstall()">立即安裝</button>
+    <div id="installHint" style="font-size:0.8rem; color:var(--muted);"></div>
+  </div>
+
+
+  <div class="container">
+    <!-- 今日記錄頁 -->
+    <div id="page-today">
+      <div class="card">
+        <div class="card-title">選擇店舖</div>
+        <div class="store-select-wrap">
+          <select id="storeSelect" onchange="onStoreChange()">
+            <option value="">-- 請選擇店舖 --</option>
+          </select>
+        </div>
+        <div style="margin-top:10px;">
+          <label>日期</label>
+          <input type="date" id="recordDate">
+        </div>
+      </div>
+
+      <div id="productsArea" class="hidden">
+        <div class="card">
+          <div class="card-title">
+            <span>產品記錄</span>
+            <span id="lastVisitInfo" style="font-size:0.8rem; color:var(--muted); font-weight:400;"></span>
+          </div>
+          <div id="productsList"></div>
+          <div class="btn-group">
+            <button class="btn btn-secondary" onclick="clearForm()">清除</button>
+            <button class="btn btn-primary" onclick="saveRecord()">儲存記錄</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="noStoreMsg" class="card">
+        <div class="empty">請先選擇店舖開始記錄</div>
+      </div>
+    </div>
+
+    <!-- 歷史記錄頁 -->
+    <div id="page-history" class="hidden">
+      <div class="card">
+        <div class="card-title">歷史記錄</div>
+        <div class="row">
+          <div>
+            <label>店舖篩選</label>
+            <select id="historyStoreFilter" onchange="renderHistory()">
+              <option value="">全部店舖</option>
+            </select>
+          </div>
+          <div>
+            <label>日期篩選</label>
+            <input type="date" id="historyDateFilter" onchange="renderHistory()">
+          </div>
+        </div>
+        <div style="margin-top:8px;">
+          <label>匯出產品（可選）</label>
+          <select id="historyProductFilter">
+            <option value="">全部產品</option>
+          </select>
+        </div>
+        <div class="btn-group" style="margin-top:8px;">
+          <button class="btn btn-secondary" onclick="clearHistoryFilters()">清除篩選</button>
+          <button class="btn btn-success" onclick="exportCSV()">匯出 CSV</button>
+        </div>
+      </div>
+      <div id="historyList" class="card"></div>
+    </div>
+
+    <!-- 設定頁 -->
+    <div id="page-settings" class="hidden">
+      <div class="card">
+        <div class="card-title">📅 預計轉價（按集團）</div>
+        <p style="font-size:0.85rem; color:var(--muted); margin-bottom:12px;">
+          預先輸入下個星期五各集團的新價錢。到達該日期後，選擇該集團店舖時會自動帶出。
+        </p>
+        <div style="margin-bottom:10px;">
+          <label>生效日期（星期五）</label>
+          <input type="date" id="scheduleEffectiveDate">
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>集團</label>
+          <select id="scheduleChain" onchange="loadScheduleForm()">
+            <option value="惠康">惠康</option>
+            <option value="百佳">百佳</option>
+            <option value="一田">一田</option>
+            <option value="Aeon">Aeon</option>
+            <option value="Donki">Donki</option>
+            <option value="佳寶">佳寶</option>
+          </select>
+        </div>
+        <div id="schedulePrices"></div>
+        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
+        <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">資料管理</div>
+        <p style="font-size:0.9rem; color:var(--muted); margin-bottom:12px;">
+          所有資料儲存在本機，不會上傳。建議定期匯出備份。
+        </p>
+        <div style="margin-bottom:10px;">
+          <label>匯出店舖（可選）</label>
+          <select id="exportStoreFilter">
+            <option value="">全部店舖</option>
+          </select>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>匯出產品（可選）</label>
+          <select id="exportProductFilter">
+            <option value="">全部產品</option>
+          </select>
+        </div>
+        <button class="btn btn-success" style="margin-bottom:10px;" onclick="exportCSV()">匯出 CSV</button>
+        <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="exportJSON()">匯出 JSON 備份</button>
+        <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="importJSON()">匯入 JSON 備份</button>
+        <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
+        <button class="btn" style="background:#dc3545; color:white;" onclick="confirmClearAll()">清除所有資料</button>
+      </div>
+      <div class="card">
+        <div class="card-title">關於</div>
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+          <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <rect x="22" y="8" width="20" height="6" rx="2" fill="#E21530"/>
+            <rect x="20" y="14" width="24" height="42" rx="6" fill="#E21530"/>
+            <rect x="24" y="20" width="16" height="28" rx="3" fill="#fff"/>
+            <text x="32" y="38" text-anchor="middle" font-size="10" font-weight="700" fill="#E21530" font-family="Arial,sans-serif">Y</text>
+          </svg>
+          <div>
+            <div style="font-weight:700; color:var(--primary);">存貨管理 v1.1</div>
+            <div style="font-size:0.85rem; color:var(--muted);">專為每日超市落貨設計</div>
+          </div>
+        </div>
+        <p style="font-size:0.85rem; color:var(--muted); line-height:1.6;">
+          支援離線使用 · 資料本地儲存<br>
+          品牌參考：香港益力多乳品有限公司<br>
+          官方網站：yakult.com.hk<br>
+          每瓶超過 100 億個乳酸菌代田株
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-nav">
+    <button id="nav-today" class="active" onclick="showPage('today')">
+      <span class="icon">📝</span>
+      <span>今日</span>
+    </button>
+    <button id="nav-history" onclick="showPage('history')">
+      <span class="icon">📋</span>
+      <span>歷史</span>
+    </button>
+    <button id="nav-settings" onclick="showPage('settings')">
+      <span class="icon">⚙️</span>
+      <span>設定</span>
+    </button>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // ========== 資料定義 ==========
+    const PRODUCTS = [
+      { id: '5pack', name: '益力多五支裝' },
+      { id: '10pack', name: '益力多十支裝' },
+      { id: 'lt', name: '益力多 LT' },
+      { id: 'grape', name: '益力多青提味' }
+    ];
+
+    // visitDays: 0=日,1=一,2=二,3=三,4=四,5=五,6=六（可在設定用歷史自動推算覆蓋）
+    const STORES = [
+      { id: 'wc107', name: '惠康 107 新墟', chain: '惠康', visitDays: [1,4] },
+      { id: 'wc166', name: '惠康 166 翠珊閣', chain: '惠康', visitDays: [2,4] },
+      { id: 'wc181', name: '惠康 181 建生', chain: '惠康', visitDays: [2,5] },
+      { id: 'wc213', name: '惠康 213 置樂', chain: '惠康', visitDays: [1,4] },
+      { id: 'wc424', name: '惠康 424 良景', chain: '惠康', visitDays: [2,5] },
+      { id: 'wc428', name: '惠康 428 雅珊閣', chain: '惠康', visitDays: [2,4] },
+      { id: 'wc442', name: '惠康 442 仁政', chain: '惠康', visitDays: [1,3,5] },
+      { id: 'wc515', name: '惠康 515 藍地', chain: '惠康', visitDays: [1,3] },
+      { id: 'wc586', name: '惠康 586 屯門時代廣場 2', chain: '惠康', visitDays: [1,3,5] },
+      { id: 'wc587', name: '惠康 587 菁田', chain: '惠康', visitDays: [2,4,6] },
+      { id: 'pk098', name: '百佳 098 屯門中心', chain: '百佳', visitDays: [1,4] },
+      { id: 'pk123', name: '百佳 123 兆康', chain: '百佳', visitDays: [2,5] },
+      { id: 'pk181', name: '百佳 181 和田', chain: '百佳', visitDays: [2,5] },
+      { id: 'pk646', name: '百佳 646 欣田', chain: '百佳', visitDays: [2,4,6] },
+      { id: 'pk665', name: '百佳 665 富泰', chain: '百佳', visitDays: [1,4] },
+      { id: 'pk692', name: '百佳 692 屯門市廣場 2', chain: '百佳', visitDays: [1,3,5] },
+      { id: 'pk695', name: '百佳 695 寶田', chain: '百佳', visitDays: [2,5] },
+      { id: 'yt015', name: '一田 015 Novowalk', chain: '一田', visitDays: [1,3,5] },
+      { id: 'dk008', name: 'Donki 008 屯門', chain: 'Donki', visitDays: [1,3,5] },
+      { id: 'ae009', name: 'Aeon 009 屯門', chain: 'Aeon', visitDays: [1,3,5] },
+      { id: 'kb076', name: '佳寶 076 海麗', chain: '佳寶', visitDays: [2,5] },
+      { id: 'kb106', name: '佳寶 106 置樂', chain: '佳寶', visitDays: [1,4] },
+      { id: 'kb151', name: '佳寶 151 屯門', chain: '佳寶', visitDays: [1,4] },
+      { id: 'kb214', name: '佳寶 214 仁政', chain: '佳寶', visitDays: [1,3,5] }
+    ];
+
+    const DAY_NAMES = ['日','一','二','三','四','五','六'];
+    // 安全存量：下次到店時希望仍有的數量
+    function getMinBuffer(prodId) {
+      return prodId === '10pack' ? 10 : 20;
+    }
+
+    // 1條單位：五支裝/LT/青提 = 10；十支裝 = 5
+    function getStripSize(prodId) {
+      return prodId === '10pack' ? 5 : 10;
+    }
+
+    // 建議落貨四捨五入到整條（十支裝：需3亦會到1條=5）
+    function roundToStrip(qty, prodId) {
+      if (qty <= 0) return 0;
+      const unit = getStripSize(prodId);
+      // 標準四捨五入到 unit 的倍數
+      let strips = Math.round(qty / unit);
+      // 十支裝：有需要但不足半條時仍至少 1 條（需3→1條）
+      if (prodId === '10pack' && qty > 0 && strips === 0) strips = 1;
+      // 其他：四捨五入後為0則不落
+      return strips * unit;
+    }
+
+    // ========== 工具函數 ==========
+    function $(id) { return document.getElementById(id); }
+
+    function formatLocalDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+    }
+
+    function todayStr() {
+      return formatLocalDate(new Date());
+    }
+
+    function getDayOfWeek(dateStr) {
+      const d = new Date(dateStr + 'T00:00:00');
+      return d.getDay(); // 0=Sun, 5=Fri
+    }
+
+    function isPriceChangeDay(dateStr) {
+      return getDayOfWeek(dateStr) === 5; // Friday
+    }
+
+    function getNextFriday(dateStr) {
+      const d = new Date(dateStr + 'T00:00:00');
+      const day = d.getDay();
+      const diff = (5 - day + 7) % 7 || 7;
+      d.setDate(d.getDate() + diff);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function getPricePeriod(dateStr) {
+      // 價錢週期：上一個星期五 至 下一個星期四
+      const d = new Date(dateStr + 'T00:00:00');
+      const day = d.getDay();
+      let start = new Date(d);
+      if (day >= 5) {
+        // Fri(5) or Sat(6): start is this Friday
+        start.setDate(d.getDate() - (day - 5));
+      } else {
+        // Sun-Thu: start is last Friday
+        start.setDate(d.getDate() - (day + 2));
+      }
+      let end = new Date(start);
+      end.setDate(start.getDate() + 6); // to next Thursday
+      return {
+        start: start.toISOString().slice(0, 10),
+        end: end.toISOString().slice(0, 10),
+        isFriday: day === 5
+      };
+    }
+
+    function showToast(msg, duration = 2500) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), duration);
+    }
+
+    // ========== 資料儲存 ==========
+    function loadData() {
+      try {
+        const raw = localStorage.getItem('yakult_records');
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveData(records) {
+      localStorage.setItem('yakult_records', JSON.stringify(records));
+    }
+
+    function getLastRecord(storeId, beforeDate) {
+      const records = loadData()
+        .filter(r => r.storeId === storeId && r.date < beforeDate)
+        .sort((a, b) => b.date.localeCompare(a.date));
+      return records[0] || null;
+    }
+
+    // 上次有效存貨 = 當時存貨 + 落貨數（落貨後的實際在庫）
+    function getEffectiveStock(productEntry) {
+      if (!productEntry || productEntry.stock == null) return null;
+      const stock = Number(productEntry.stock) || 0;
+      const order = productEntry.order != null ? (Number(productEntry.order) || 0) : 0;
+      return stock + order;
+    }
+
+    function getRecord(storeId, date) {
+      return loadData().find(r => r.storeId === storeId && r.date === date) || null;
+    }
+
+    function getStoreChain(storeId) {
+      const s = STORES.find(x => x.id === storeId);
+      return s ? s.chain : null;
+    }
+
+    function loadScheduleData() {
+      try {
+        const raw = localStorage.getItem('yakult_scheduled_prices');
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveScheduleData(data) {
+      localStorage.setItem('yakult_scheduled_prices', JSON.stringify(data));
+    }
+
+    // 取得某產品的建議價錢：
+    // 1) 記錄日 ≥ 預計轉價生效日 → 用預計轉價（除非該店在生效日後已有實際價錢）
+    // 2) 同店上次價錢
+    // 3) 同集團上次價錢
+    function getSuggestedPrice(storeId, prodId, beforeDate) {
+      const chain = getStoreChain(storeId);
+      const schedules = loadScheduleData();
+      const schedule = chain ? schedules[chain] : null;
+      const date = beforeDate || todayStr();
+
+      const records = loadData()
+        .filter(r => r.date < date)
+        .sort((a, b) => b.date.localeCompare(a.date) || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+
+      let storePrice = null;
+      let storePriceDate = null;
+      for (const r of records) {
+        if (r.storeId === storeId && r.products[prodId] && r.products[prodId].price != null) {
+          storePrice = r.products[prodId].price;
+          storePriceDate = r.date;
+          break;
+        }
+      }
+
+      if (schedule && schedule.effectiveDate && schedule.prices) {
+        const scheduledPrice = schedule.prices[prodId];
+        const hasScheduled = scheduledPrice != null && scheduledPrice !== '' && !isNaN(parseFloat(scheduledPrice));
+        // 記錄日期已到達或超過生效日
+        if (hasScheduled && date >= schedule.effectiveDate) {
+          // 該店在生效日當日或之後已錄過價錢 → 用實際；否則用預計轉價
+          if (storePrice != null && storePriceDate >= schedule.effectiveDate) {
+            return parseFloat(storePrice);
+          }
+          return parseFloat(scheduledPrice);
+        }
+      }
+
+      if (storePrice != null) return parseFloat(storePrice);
+
+      if (chain) {
+        for (const r of records) {
+          if (getStoreChain(r.storeId) === chain && r.products[prodId] && r.products[prodId].price != null) {
+            return parseFloat(r.products[prodId].price);
+          }
+        }
+      }
+      return null;
+    }
+
+    function getNextFridayStr() {
+      const d = new Date();
+      const day = d.getDay();
+      const diff = (5 - day + 7) % 7 || 7;
+      const add = day === 5 ? 0 : diff;
+      d.setDate(d.getDate() + add);
+      return formatLocalDate(d);
+    }
+
+    function loadScheduleForm() {
+      const chain = $('scheduleChain').value;
+      const data = loadScheduleData();
+      const entry = data[chain] || {};
+      const eff = entry.effectiveDate || getNextFridayStr();
+      $('scheduleEffectiveDate').value = eff;
+
+      const prices = entry.prices || {};
+      $('schedulePrices').innerHTML = PRODUCTS.map(p => `
+        <div style="margin-bottom:8px;">
+          <label>${p.name} 預計價錢 ($)</label>
+          <input type="number" id="sched-price-${p.id}" min="0" step="0.1" placeholder="留空則不設定" value="${prices[p.id] != null ? prices[p.id] : ''}">
+        </div>
+      `).join('');
+
+      renderScheduleSummary();
+    }
+
+    function saveSchedule() {
+      const chain = $('scheduleChain').value;
+      const effectiveDate = $('scheduleEffectiveDate').value;
+      if (!effectiveDate) {
+        showToast('請選擇生效日期');
+        return;
+      }
+      // 提醒最好是星期五
+      if (getDayOfWeek(effectiveDate) !== 5) {
+        if (!confirm('選擇的日期不是星期五，確定仍要儲存？')) return;
+      }
+
+      const prices = {};
+      PRODUCTS.forEach(p => {
+        const v = $(`sched-price-${p.id}`).value;
+        if (v !== '') prices[p.id] = parseFloat(v);
+      });
+
+      const data = loadScheduleData();
+      const prev = data[chain] && data[chain].prices ? data[chain].prices : {};
+      // 合併價錢：新輸入覆蓋舊值，未填的保留舊設定
+      const mergedPrices = { ...prev, ...prices };
+      data[chain] = { effectiveDate, prices: mergedPrices };
+      saveScheduleData(data);
+      // 同步更新歷史：該集團、日期 ≥ 生效日 的記錄價錢
+      const updatedCount = applyScheduleToHistory(chain, effectiveDate, mergedPrices);
+      renderScheduleSummary();
+      PRODUCTS.forEach(p => {
+        const el = $(`sched-price-${p.id}`);
+        if (el) el.value = '';
+      });
+      if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = getNextFridayStr();
+      const curStore = $('storeSelect') && $('storeSelect').value;
+      if (curStore && getStoreChain(curStore) === chain) {
+        onStoreChange();
+      }
+      if ($('page-history') && !$('page-history').classList.contains('hidden')) {
+        renderHistory();
+      }
+      showToast(`${chain} 已儲存；已更新 ${updatedCount} 筆歷史價錢（${effectiveDate} 起）`);
+    }
+
+    // 將預計轉價寫入符合條件的歷史記錄
+    function applyScheduleToHistory(chain, effectiveDate, prices) {
+      if (!chain || !effectiveDate || !prices) return 0;
+      const all = loadData();
+      let count = 0;
+      all.forEach(r => {
+        if (getStoreChain(r.storeId) !== chain) return;
+        if (r.date < effectiveDate) return;
+        if (!r.products) r.products = {};
+        let changed = false;
+        PRODUCTS.forEach(p => {
+          if (prices[p.id] == null || prices[p.id] === '') return;
+          if (!r.products[p.id]) r.products[p.id] = {};
+          const newPrice = parseFloat(prices[p.id]);
+          if (r.products[p.id].price !== newPrice) {
+            r.products[p.id].price = newPrice;
+            changed = true;
+          }
+        });
+        if (changed) {
+          r.updatedAt = new Date().toISOString();
+          count++;
+        }
+      });
+      if (count > 0) saveData(all);
+      return count;
+    }
+
+    function renderScheduleSummary() {
+      const data = loadScheduleData();
+      const lines = Object.keys(data).map(chain => {
+        const e = data[chain];
+        const priceStr = PRODUCTS.map(p => {
+          const v = e.prices && e.prices[p.id];
+          return v != null ? `${p.name.replace('益力多','')}$${v}` : null;
+        }).filter(Boolean).join('、');
+        return `<div><strong>${chain}</strong> ${e.effectiveDate} 起${priceStr ? '：' + priceStr : '（未設價錢）'}</div>`;
+      });
+      $('scheduleSummary').innerHTML = lines.length
+        ? '<div style="font-weight:600;margin-bottom:4px;">已設定：</div>' + lines.join('')
+        : '尚未設定任何預計轉價';
+    }
+
+    // 暫存同步到的網購價錢，供套用
+    let lastSyncedPrices = null; // { 惠康: {5pack:..}, 百佳: {...}, Aeon: {...} }
+
+    async function fetchTextViaProxy(url) {
+      // 優先用 r.jina.ai（較少 CORS 問題），再試其他
+      const proxies = [
+        u => 'https://r.jina.ai/' + u,
+        u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+        u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+        u => u
+      ];
+      let lastErr = null;
+      for (const make of proxies) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 20000);
+          const res = await fetch(make(url), { cache: 'no-store', signal: controller.signal });
+          clearTimeout(timer);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const text = await res.text();
+          if (text && text.length > 50) return text;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('無法取得資料');
+    }
+
+    function parseConsumerCouncilCsv(raw) {
+      // jina 可能包一層 markdown，抽出含 WELLCOME/PARKNSHOP 的行
+      const mapNameToProd = (name) => {
+        const n = String(name).replace(/\s+/g, '');
+        if (/青提|提子|muscat|grape/i.test(n)) return 'grape';
+        if (/LT|低糖高纖/i.test(n)) return 'lt';
+        if (/10支|十支|１０支|x10|X10|100毫升x10/i.test(n)) return '10pack';
+        if (/5支|五支|５支|x5|X5|100毫升x5/i.test(n)) return '5pack';
+        return null;
+      };
+      const chainMap = {
+        WELLCOME: '惠康',
+        PARKNSHOP: '百佳',
+        AEON: 'Aeon',
+        JASONS: 'Jasons'
+      };
+      const result = {};
+      const lines = String(raw).split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line || line.indexOf('益力多') < 0) continue;
+        if (line.indexOf('WELLCOME') < 0 && line.indexOf('PARKNSHOP') < 0 &&
+            line.indexOf('AEON') < 0 && line.indexOf('JASONS') < 0) continue;
+
+        // 用正則抓：益力多,名稱,...,CODE,價錢
+        let brand = '', name = '', code = '', priceStr = '';
+        const m = line.match(/益力多\s*,\s*([^,]+)\s*,\s*(WELLCOME|PARKNSHOP|AEON|JASONS)\s*,\s*([0-9.]+)/i);
+        if (m) {
+          name = m[1].trim();
+          code = m[2].toUpperCase();
+          priceStr = m[3];
+          brand = '益力多';
+        } else {
+          const cols = line.split(',');
+          if (cols.length < 8) continue;
+          brand = (cols[4] || '').trim();
+          name = (cols[5] || '').trim();
+          code = (cols[6] || '').trim().toUpperCase();
+          priceStr = (cols[7] || '').trim();
+          if (brand !== '益力多') continue;
+        }
+        const chain = chainMap[code];
+        if (!chain) continue;
+        const prodId = mapNameToProd(name);
+        if (!prodId) continue;
+        const price = parseFloat(priceStr);
+        if (isNaN(price)) continue;
+        if (!result[chain]) result[chain] = {};
+        result[chain][prodId] = price;
+      }
+      return result;
+    }
+
+    function parsePnsHtml(html) {
+      const prices = {};
+      const text = String(html).replace(/<[^>]+>/g, '\n').replace(/&nbsp;/g, ' ');
+      const patterns = [
+        { id: '5pack', re: /[５5]支裝[\s\S]{0,300}?\$\s*(\d+(?:\.\d+)?)/ },
+        { id: '10pack', re: /[１1][０0]支裝[\s\S]{0,300}?\$\s*(\d+(?:\.\d+)?)/ },
+        { id: 'lt', re: /(?:Ｌ[ｔt]|LT|低糖高纖)[\s\S]{0,300}?\$\s*(\d+(?:\.\d+)?)/i },
+        { id: 'grape', re: /青提[\s\S]{0,300}?\$\s*(\d+(?:\.\d+)?)/ }
+      ];
+      patterns.forEach(({ id, re }) => {
+        const m = text.match(re);
+        if (m) prices[id] = parseFloat(m[1]);
+      });
+      return prices;
+    }
+
+    async function syncOnlinePrices() {
+      const box = $('syncPriceResult');
+      const btn = $('btnSyncPrices');
+      btn.disabled = true;
+      box.innerHTML = '<span style="color:var(--muted)">正在讀取消委會／百佳價錢…</span>';
+
+      const merged = {};
+      const notes = [];
+
+      try {
+        const csv = await fetchTextViaProxy(
+          'https://online-price-watch.consumer.org.hk/opw/opendata/pricewatch_zh-Hant.csv'
+        );
+        const cc = parseConsumerCouncilCsv(csv);
+        Object.keys(cc).forEach(chain => {
+          merged[chain] = { ...(merged[chain] || {}), ...cc[chain] };
+        });
+        notes.push('消委會價格一覽通：成功');
+      } catch (e) {
+        notes.push('消委會：讀取失敗（' + (e.message || '網絡／CORS') + '）');
+      }
+
+      try {
+        const html = await fetchTextViaProxy(
+          'https://www.pns.hk/zh-hk/all-brands/b/125016/%E7%9B%8A%E5%8A%9B%E5%A4%9A'
+        );
+        const pns = parsePnsHtml(html);
+        if (Object.keys(pns).length) {
+          merged['百佳'] = { ...(merged['百佳'] || {}), ...pns };
+          notes.push('百佳網購：成功');
+        } else {
+          notes.push('百佳網購：未能解析價錢');
+        }
+      } catch (e) {
+        notes.push('百佳網購：讀取失敗（' + (e.message || '網絡／CORS') + '）');
+      }
+
+      lastSyncedPrices = merged;
+      btn.disabled = false;
+
+      const chains = ['惠康', '百佳', 'Aeon'];
+      let html = notes.map(n => `<div>${n}</div>`).join('');
+      html += '<div style="margin-top:10px;font-weight:600;">讀取結果</div>';
+
+      let hasAny = false;
+      chains.forEach(chain => {
+        const p = merged[chain];
+        if (!p || !Object.keys(p).length) {
+          html += `<div style="margin-top:6px;color:var(--muted)">${chain}：無資料</div>`;
+          return;
+        }
+        hasAny = true;
+        const parts = PRODUCTS.map(prod =>
+          p[prod.id] != null ? `${prod.name.replace('益力多', '')} $${p[prod.id]}` : null
+        ).filter(Boolean).join('、');
+        html += `<div style="margin-top:6px;"><strong>${chain}</strong>：${parts}</div>`;
+      });
+
+      if (hasAny) {
+        html += `<button class="btn btn-success" style="margin-top:12px;" onclick="applySyncedPrices()">套用至預計轉價（今日生效）</button>`;
+        html += `<p style="font-size:0.8rem;color:var(--muted);margin-top:8px;">會更新惠康／百佳（及有資料的 Aeon）的預計轉價，生效日設為今天。</p>`;
+      } else {
+        html += `<p style="margin-top:10px;color:#e65100;">未能自動取得價錢。</p>`;
+        html += `<p style="font-size:0.85rem;margin-top:6px;">請確認手機有網絡，然後再按一次「立即同步」。若仍然失敗：</p>`;
+        html += `<ol style="font-size:0.85rem;color:var(--muted);margin:8px 0 0 18px;padding:0;">`;
+        html += `<li>用上方連結打開百佳／惠康／消委會查看價錢</li>`;
+        html += `<li>到下方「預計轉價」手動輸入各集團價錢並儲存</li>`;
+        html += `</ol>`;
+      }
+      box.innerHTML = html;
+    }
+
+    function applySyncedPrices() {
+      if (!lastSyncedPrices) {
+        showToast('請先同步價錢');
+        return;
+      }
+      const data = loadScheduleData();
+      const today = todayStr();
+      let count = 0;
+      ['惠康', '百佳', 'Aeon'].forEach(chain => {
+        const p = lastSyncedPrices[chain];
+        if (!p || !Object.keys(p).length) return;
+        const prev = (data[chain] && data[chain].prices) || {};
+        data[chain] = {
+          effectiveDate: today,
+          prices: { ...prev, ...p }
+        };
+        count++;
+      });
+      saveScheduleData(data);
+      renderScheduleSummary();
+      loadScheduleForm();
+      showToast(`已套用 ${count} 個集團的網購價錢`);
+    }
+
+    // ========== 初始化 ==========
+    function init() {
+      // 填入店舖選單
+      const sel = $('storeSelect');
+      const histSel = $('historyStoreFilter');
+      STORES.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        sel.appendChild(opt);
+
+        const opt2 = document.createElement('option');
+        opt2.value = s.id;
+        opt2.textContent = s.name;
+        histSel.appendChild(opt2);
+      });
+
+      $('recordDate').value = todayStr();
+      $('recordDate').addEventListener('change', onDateChange);
+
+      // 渲染產品輸入區
+      renderProductForms();
+      fillExportFilters();
+      updatePriceAlert();
+    }
+
+    function filterStores() {
+      // 已移除店名搜尋
+    }
+
+    function renderProductForms() {
+      const list = $('productsList');
+      list.innerHTML = PRODUCTS.map(p => `
+        <div class="product-card" id="prod-${p.id}">
+          <div class="product-name">${p.name}</div>
+          <div class="info-row">
+            <span class="label">上次存貨</span>
+            <span class="value" id="last-${p.id}">—</span>
+          </div>
+          <div class="info-row">
+            <span class="label">參考價錢</span>
+            <span class="value" id="priceDisplay-${p.id}">—</span>
+          </div>
+          <div style="margin-top:8px;">
+            <label>今次存貨</label>
+            <input type="number" id="stock-${p.id}" min="0" step="1" placeholder="0" oninput="calcSuggest('${p.id}')">
+          </div>
+          <div class="info-row" style="margin-top:8px;">
+            <span class="label">銷量（上次−今次）</span>
+            <span class="sold" id="sold-${p.id}">—</span>
+          </div>
+          <div class="info-row">
+            <span class="label">建議落貨</span>
+            <span class="suggest" id="suggest-${p.id}">—</span>
+          </div>
+          <div style="margin-top:8px;">
+            <label>實際落貨數量</label>
+            <input type="number" id="order-${p.id}" min="0" step="1" placeholder="輸入落貨數">
+          </div>
+          <input type="hidden" id="price-${p.id}" value="">
+        </div>
+      `).join('');
+      setupEnterNavigation();
+    }
+
+    // Enter：跳到下一輸入欄；最後一欄（青提味落貨數）→ 儲存
+    function setupEnterNavigation() {
+      // 順序：各產品 今次存貨 → 實際落貨
+      const fields = [];
+      PRODUCTS.forEach(p => {
+        fields.push($(`stock-${p.id}`));
+        fields.push($(`order-${p.id}`));
+      });
+      fields.forEach((el, i) => {
+        if (!el) return;
+        el.onkeydown = function (e) {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          if (i < fields.length - 1) {
+            const next = fields[i + 1];
+            if (next) {
+              next.focus();
+              if (typeof next.select === 'function') next.select();
+            }
+          } else {
+            // 最後一欄：青提味落貨數 → 儲存
+            el.blur();
+            saveRecord();
+          }
+        };
+      });
+    }
+
+    function updatePriceAlert() {
+      // 已關閉轉價提醒
+    }
+
+    // 只改日期時：更新「上次存貨」與轉價提示，保留已輸入的數量／價錢／落貨
+    function onDateChange() {
+      const storeId = $('storeSelect').value;
+      const date = $('recordDate').value || todayStr();
+      updatePriceAlert();
+
+      if (!storeId) return;
+
+      const last = getLastRecord(storeId, date);
+      $('lastVisitInfo').textContent = last
+        ? `上次：${last.date}`
+        : '尚無歷史記錄';
+
+      PRODUCTS.forEach(p => {
+        const lastStock = last ? getEffectiveStock(last.products[p.id]) : null;
+        $(`last-${p.id}`).textContent = lastStock !== null ? lastStock : '—';
+        // 日期變更時更新參考價錢，不改動存貨／落貨輸入
+        const suggested = getSuggestedPrice(storeId, p.id, date);
+        $(`price-${p.id}`).value = suggested !== null ? suggested : '';
+        if ($(`priceDisplay-${p.id}`)) {
+          $(`priceDisplay-${p.id}`).textContent = suggested !== null ? `$${suggested}` : '—';
+        }
+        calcSuggest(p.id);
+      });
+    }
+
+    function onStoreChange() {
+      const storeId = $('storeSelect').value;
+      const date = $('recordDate').value || todayStr();
+
+      // 手動換店（非載入修改）時取消搬移追蹤
+      if (editingOriginal && editingOriginal.storeId !== storeId) {
+        editingOriginal = null;
+      }
+
+      if (!storeId) {
+        $('productsArea').classList.add('hidden');
+        $('noStoreMsg').classList.remove('hidden');
+        return;
+      }
+
+      $('productsArea').classList.remove('hidden');
+      $('noStoreMsg').classList.add('hidden');
+      updatePriceAlert();
+
+      const last = getLastRecord(storeId, date);
+      const existing = getRecord(storeId, date);
+
+      // 只有從歷史「載入修改」時才填入舊資料；一般選店一律空白
+      const isEditing = editingOriginal &&
+        editingOriginal.storeId === storeId &&
+        editingOriginal.date === date;
+
+      $('lastVisitInfo').textContent = last
+        ? `上次：${last.date}`
+        : '尚無歷史記錄';
+
+      const chain = getStoreChain(storeId);
+
+      PRODUCTS.forEach(p => {
+        const lastStock = last ? getEffectiveStock(last.products[p.id]) : null;
+        $(`last-${p.id}`).textContent = lastStock !== null ? lastStock : '—';
+
+        // 惠康暫不售青提味
+        if (chain === '惠康' && p.id === 'grape') {
+          $(`stock-${p.id}`).value = '';
+          $(`order-${p.id}`).value = '';
+          $(`price-${p.id}`).value = '';
+          $(`priceDisplay-${p.id}`).textContent = '暫不售';
+          $(`sold-${p.id}`).textContent = '—';
+          $(`suggest-${p.id}`).textContent = '—';
+          return;
+        }
+
+        if (isEditing && existing && existing.products[p.id]) {
+          $(`stock-${p.id}`).value = existing.products[p.id].stock ?? '';
+          $(`order-${p.id}`).value = existing.products[p.id].order ?? '';
+          const pr = existing.products[p.id].price;
+          $(`price-${p.id}`).value = pr != null ? pr : '';
+          $(`priceDisplay-${p.id}`).textContent = pr != null ? `$${pr}` : '—';
+        } else {
+          $(`stock-${p.id}`).value = '';
+          $(`order-${p.id}`).value = '';
+          // 價錢自動沿用（同店／同集團／預計轉價），無需手填
+          const suggested = getSuggestedPrice(storeId, p.id, date);
+          $(`price-${p.id}`).value = suggested !== null ? suggested : '';
+          $(`priceDisplay-${p.id}`).textContent = suggested !== null ? `$${suggested}` : '—';
+        }
+
+        calcSuggest(p.id);
+      });
+    }
+
+    // 從一組按日期排序的記錄中，抽出「相近價錢」期間的銷量
+    function collectSalesAtPrice(records, prodId, targetPrice) {
+      const sales = [];
+      for (let i = 1; i < records.length; i++) {
+        const prev = records[i - 1].products[prodId];
+        const curr = records[i].products[prodId];
+        if (!prev || prev.stock == null || !curr || curr.stock == null) continue;
+
+        // 該段銷售期的價錢：上一筆的價錢（落貨後至下次巡店的售價）
+        const periodPrice = prev.price != null ? Number(prev.price) : null;
+        if (periodPrice == null) continue;
+        if (Math.abs(periodPrice - targetPrice) > 1.01) continue;
+
+        const effectivePrev = getEffectiveStock(prev);
+        if (effectivePrev == null) continue;
+        const sold = effectivePrev - Number(curr.stock);
+        if (sold >= 0) sales.push(sold);
+      }
+      return sales;
+    }
+
+    // 預計銷量：該店在相近售價下的歷史平均「每段到店間隔」銷量
+    function getExpectedSalesByPrice(storeId, prodId, targetPrice, beforeDate) {
+      if (targetPrice == null || isNaN(targetPrice)) return null;
+
+      const storeRecs = loadData()
+        .filter(r => r.storeId === storeId && r.date < beforeDate)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const sales = collectSalesAtPrice(storeRecs, prodId, targetPrice);
+      if (sales.length === 0) return null;
+
+      const avg = sales.reduce((a, b) => a + b, 0) / sales.length;
+      // 平均每段間隔天數（有銷量的相鄰記錄）
+      let gapSum = 0, gapN = 0;
+      for (let i = 1; i < storeRecs.length; i++) {
+        const d0 = new Date(storeRecs[i - 1].date + 'T12:00:00');
+        const d1 = new Date(storeRecs[i].date + 'T12:00:00');
+        const gap = Math.round((d1 - d0) / 86400000);
+        if (gap > 0 && gap < 30) { gapSum += gap; gapN++; }
+      }
+      const avgGap = gapN > 0 ? gapSum / gapN : null;
+      return { avg: avg, count: sales.length, avgGap };
+    }
+
+    // 取得店舖到訪星期（可被 localStorage 覆蓋）
+    function getStoreVisitDays(storeId) {
+      try {
+        const raw = localStorage.getItem('yakult_visit_days');
+        if (raw) {
+          const map = JSON.parse(raw);
+          if (map[storeId] && map[storeId].length) return map[storeId];
+        }
+      } catch (e) {}
+      const s = STORES.find(x => x.id === storeId);
+      return (s && s.visitDays) ? s.visitDays.slice() : [1, 3, 5];
+    }
+
+    // 由歷史記錄推算最常見的到訪星期
+    function inferVisitDaysFromHistory(storeId) {
+      const recs = loadData().filter(r => r.storeId === storeId);
+      if (recs.length < 2) return null;
+      const counts = [0,0,0,0,0,0,0];
+      recs.forEach(r => {
+        const d = new Date(r.date + 'T12:00:00');
+        counts[d.getDay()]++;
+      });
+      const max = Math.max(...counts);
+      if (max < 1) return null;
+      const days = [];
+      counts.forEach((c, i) => { if (c >= Math.max(1, max * 0.5)) days.push(i); });
+      return days.length ? days : null;
+    }
+
+    // 由記錄日起，下一次預定到店的間隔天數（至少 1 天後）
+    // 優先使用已設定車期，不以歷史覆蓋
+    function getDaysUntilNextVisit(storeId, fromDateStr) {
+      const days = getStoreVisitDays(storeId);
+
+      const from = new Date(fromDateStr + 'T12:00:00');
+      for (let add = 1; add <= 14; add++) {
+        const d = new Date(from);
+        d.setDate(from.getDate() + add);
+        if (days.indexOf(d.getDay()) >= 0) return add;
+      }
+      const recs = loadData()
+        .filter(r => r.storeId === storeId && r.date <= fromDateStr)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (recs.length >= 2) {
+        const d0 = new Date(recs[recs.length - 2].date + 'T12:00:00');
+        const d1 = new Date(recs[recs.length - 1].date + 'T12:00:00');
+        const gap = Math.round((d1 - d0) / 86400000);
+        if (gap > 0) return gap;
+      }
+      return 3;
+    }
+
+    function formatVisitDaysLabel(storeId) {
+      const days = getStoreVisitDays(storeId);
+      // 明確顯示：逢星期一、星期四
+      return '逢' + days.map(d => '星期' + DAY_NAMES[d]).join('、');
+    }
+
+    // 回傳下次到店：{ days, dateStr, weekLabel }
+    function getNextVisitInfo(storeId, fromDateStr) {
+      const days = getStoreVisitDays(storeId);
+      const from = new Date(fromDateStr + 'T12:00:00');
+      for (let add = 1; add <= 14; add++) {
+        const d = new Date(from);
+        d.setDate(from.getDate() + add);
+        if (days.indexOf(d.getDay()) >= 0) {
+          return {
+            days: add,
+            dateStr: formatLocalDate(d),
+            weekLabel: '星期' + DAY_NAMES[d.getDay()]
+          };
+        }
+      }
+      return { days: 3, dateStr: '', weekLabel: '' };
+    }
+
+    function calcSuggest(prodId) {
+      const lastText = $(`last-${prodId}`).textContent;
+      const lastStock = lastText === '—' ? null : parseInt(lastText, 10);
+      const curStockRaw = $(`stock-${prodId}`).value;
+      const curStock = curStockRaw === '' ? NaN : parseInt(curStockRaw, 10);
+
+      const soldEl = $(`sold-${prodId}`);
+      const suggestEl = $(`suggest-${prodId}`);
+
+      if (lastStock !== null && !isNaN(curStock)) {
+        const sold = lastStock - curStock;
+        soldEl.textContent = sold >= 0 ? sold : `${sold} (異常)`;
+      } else {
+        soldEl.textContent = '—';
+      }
+
+      const storeId = $('storeSelect').value;
+      const date = $('recordDate').value || todayStr();
+      const priceVal = parseFloat($(`price-${prodId}`).value);
+      const targetPrice = !isNaN(priceVal) ? priceVal : null;
+
+      if (!storeId) {
+        suggestEl.textContent = '—';
+        return;
+      }
+
+      const minBuf = getMinBuffer(prodId);
+      const nextInfo = getNextVisitInfo(storeId, date);
+      const daysNext = nextInfo.days;
+      // 車期提示只講下次何時到
+      const nextHint = nextInfo.weekLabel
+        ? (nextInfo.dateStr
+            ? `下次${nextInfo.weekLabel} ${nextInfo.dateStr}`
+            : `下次${nextInfo.weekLabel}`)
+        : `下次${daysNext}天後`;
+
+      // 無存貨數時無法判斷是否足夠
+      if (isNaN(curStock)) {
+        suggestEl.textContent = '—';
+        return;
+      }
+
+      // 預計到下次的銷量
+      let expectedUntilNext = null;
+      let srcHint = '';
+      if (targetPrice != null) {
+        const expected = getExpectedSalesByPrice(storeId, prodId, targetPrice, date);
+        if (expected && expected.count > 0) {
+          if (expected.avgGap && expected.avgGap > 0) {
+            // 按日均銷 × 距下次天數
+            const daily = expected.avg / expected.avgGap;
+            expectedUntilNext = daily * daysNext;
+            srcHint = `$${targetPrice}日均`;
+          } else {
+            // 無法算日均時，用每段均銷按天數比例
+            expectedUntilNext = expected.avg * (daysNext / 3);
+            srcHint = `$${targetPrice}均銷`;
+          }
+        }
+      }
+      // 無相近售價時：用最近一次銷量粗估
+      if (expectedUntilNext == null && lastStock !== null && !isNaN(curStock)) {
+        const lastSold = Math.max(0, lastStock - curStock);
+        expectedUntilNext = lastSold * (daysNext / Math.max(1, daysNext));
+        // lastSold already for previous interval — scale by daysNext/typical
+        const typical = getDaysUntilNextVisit(storeId, date);
+        expectedUntilNext = lastSold; // 上一段間隔的銷量作參考
+        srcHint = '近次銷量';
+      }
+
+      if (expectedUntilNext == null) {
+        if (curStock >= minBuf) {
+          suggestEl.textContent = `0條（足夠，${nextHint}）`;
+        } else {
+          const raw = minBuf - curStock;
+          const suggest = roundToStrip(raw, prodId);
+          const strips = suggest / getStripSize(prodId);
+          suggestEl.textContent = strips === 0
+            ? `0條（足夠，${nextHint}）`
+            : `${strips}條（補安全，${nextHint}）`;
+        }
+        return;
+      }
+
+      expectedUntilNext = Math.max(0, expectedUntilNext);
+      const need = expectedUntilNext + minBuf;
+      const rawNeed = Math.max(0, need - curStock);
+      const suggest = roundToStrip(rawNeed, prodId);
+      const strips = suggest / getStripSize(prodId);
+      const unit = getStripSize(prodId);
+
+      if (strips === 0) {
+        suggestEl.textContent = `0條（足夠，${nextHint}）`;
+      } else {
+        suggestEl.textContent = `${strips}條（${nextHint}）`;
+      }
+    }
+
+    function clearForm() {
+      editingOriginal = null;
+      PRODUCTS.forEach(p => {
+        $(`stock-${p.id}`).value = '';
+        $(`price-${p.id}`).value = '';
+        $(`order-${p.id}`).value = '';
+        calcSuggest(p.id);
+      });
+      $('storeSelect').value = '';
+      onStoreChange();
+      showToast('已清除輸入');
+    }
+
+    // 記錄「載入修改」時的原始店舖+日期，方便改日期後搬移記錄
+    let editingOriginal = null; // { storeId, date } or null
+
+    function saveRecord() {
+      const storeId = $('storeSelect').value;
+      const date = $('recordDate').value;
+
+      if (!storeId) {
+        showToast('請先選擇店舖');
+        return;
+      }
+      if (!date) {
+        showToast('請選擇日期');
+        return;
+      }
+
+      const products = {};
+      let hasData = false;
+
+      PRODUCTS.forEach(p => {
+        const stock = $(`stock-${p.id}`).value;
+        const price = $(`price-${p.id}`).value;
+        const order = $(`order-${p.id}`).value;
+
+        products[p.id] = {
+          stock: stock === '' ? null : parseInt(stock, 10),
+          price: price === '' ? null : parseFloat(price),
+          order: order === '' ? null : parseInt(order, 10)
+        };
+
+        if (stock !== '' || order !== '') hasData = true;
+      });
+
+      if (!hasData) {
+        showToast('請至少填寫一個產品的存貨或落貨數');
+        return;
+      }
+
+      let records = loadData();
+
+      // 若從「載入修改」進來並改了日期／店舖 → 刪除舊日期那筆（搬移）
+      let moved = false;
+      if (editingOriginal &&
+          (editingOriginal.storeId !== storeId || editingOriginal.date !== date)) {
+        records = records.filter(r =>
+          !(r.storeId === editingOriginal.storeId && r.date === editingOriginal.date)
+        );
+        moved = true;
+      }
+
+      const idx = records.findIndex(r => r.storeId === storeId && r.date === date);
+
+      const record = {
+        storeId,
+        storeName: STORES.find(s => s.id === storeId).name,
+        date,
+        products,
+        updatedAt: new Date().toISOString()
+      };
+
+      const isUpdate = idx >= 0;
+      if (isUpdate) {
+        records[idx] = record;
+      } else {
+        records.push(record);
+      }
+
+      saveData(records);
+      editingOriginal = null;
+
+      if (isUpdate || moved) {
+        // 修改或搬移後：保留資料在畫面上
+        onStoreChange();
+        showToast(moved ? `已搬移至 ${date}` : '已更新記錄');
+      } else {
+        // 新記錄：自動清除，方便選下一間店
+        PRODUCTS.forEach(p => {
+          $(`stock-${p.id}`).value = '';
+          $(`price-${p.id}`).value = '';
+          $(`order-${p.id}`).value = '';
+          calcSuggest(p.id);
+        });
+        $('storeSelect').value = '';
+        onStoreChange();
+        showToast('已儲存，可選擇下一間店');
+      }
+    }
+
+    // ========== 歷史 ==========
+    function renderHistory() {
+      const storeFilter = $('historyStoreFilter').value;
+      const dateFilter = $('historyDateFilter').value;
+      let records = loadData().sort((a, b) => b.date.localeCompare(a.date) || a.storeName.localeCompare(b.storeName));
+
+      if (storeFilter) records = records.filter(r => r.storeId === storeFilter);
+      if (dateFilter) records = records.filter(r => r.date === dateFilter);
+
+      const list = $('historyList');
+      if (records.length === 0) {
+        list.innerHTML = '<div class="empty">沒有符合條件的記錄</div>';
+        return;
+      }
+
+      list.innerHTML = records.map(r => {
+        const items = PRODUCTS.map(p => {
+          const pr = r.products[p.id] || {};
+          if (pr.stock == null && pr.order == null && pr.price == null) return '';
+          const stock = pr.stock != null ? Number(pr.stock) : null;
+          // 無落貨視為 0（不用 —）
+          const order = pr.order != null ? Number(pr.order) : 0;
+          const total = stock != null ? stock + order : (pr.order != null ? order : null);
+          const parts = [];
+          parts.push(`存${stock != null ? stock : '—'}`);
+          parts.push(`落${order}`);
+          parts.push(`總${total != null ? total : '—'}`);
+          parts.push(pr.price != null ? `$${pr.price}` : '價—');
+          return `<div><strong>${p.name.replace('益力多','')}</strong>：${parts.join(' / ')}</div>`;
+        }).filter(Boolean).join('');
+
+        return `
+          <div class="history-item">
+            <div class="history-header">
+              <span>${r.storeName}</span>
+              <span class="history-date">${r.date}</span>
+            </div>
+            <div class="history-detail">${items || '（無詳細資料）'}</div>
+            <div style="margin-top:8px;">
+              <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="loadRecordToForm('${r.storeId}','${r.date}')">載入修改</button>
+              <button class="btn" style="padding:6px 12px; font-size:0.85rem; width:auto; background:#dc3545; color:white; margin-left:6px;" onclick="deleteRecord('${r.storeId}','${r.date}')">刪除</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function clearHistoryFilters() {
+      if ($('historyStoreFilter')) $('historyStoreFilter').value = '';
+      if ($('historyDateFilter')) $('historyDateFilter').value = '';
+      if ($('historyProductFilter')) $('historyProductFilter').value = '';
+      renderHistory();
+    }
+
+    function loadRecordToForm(storeId, date) {
+      $('storeSelect').value = storeId;
+      $('recordDate').value = date;
+      editingOriginal = { storeId, date }; // 記住原始，改日期後可搬移
+      showPage('today');
+      onStoreChange(); // 會載入該日完整記錄（存貨、價錢、落貨）
+      showToast('已載入記錄，可修改後再儲存');
+    }
+
+    function deleteRecord(storeId, date) {
+      if (!confirm(`確定刪除 ${date} 的記錄？`)) return;
+      let records = loadData().filter(r => !(r.storeId === storeId && r.date === date));
+      saveData(records);
+      renderHistory();
+      showToast('已刪除');
+    }
+
+    // ========== 匯出 ==========
+    function fillExportFilters() {
+      const storeSel = $('exportStoreFilter');
+      const prodSel = $('exportProductFilter');
+      const histProd = $('historyProductFilter');
+      const opts = '<option value="">全部產品</option>' +
+        PRODUCTS.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      if (storeSel) {
+        const curS = storeSel.value;
+        storeSel.innerHTML = '<option value="">全部店舖</option>' +
+          STORES.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        storeSel.value = curS;
+      }
+      if (prodSel) {
+        const curP = prodSel.value;
+        prodSel.innerHTML = opts;
+        prodSel.value = curP;
+      }
+      if (histProd) {
+        const curH = histProd.value;
+        histProd.innerHTML = opts;
+        histProd.value = curH;
+      }
+    }
+
+    function exportCSV() {
+      const all = loadData();
+      if (all.length === 0) {
+        showToast('沒有資料可匯出');
+        return;
+      }
+
+      const storeFilter = ($('exportStoreFilter') && $('exportStoreFilter').value) || '';
+      const productFilter = ($('exportProductFilter') && $('exportProductFilter').value)
+        || ($('historyProductFilter') && $('historyProductFilter').value)
+        || '';
+      // 歷史頁若有店舖篩選，可沿用
+      const histStore = ($('historyStoreFilter') && $('historyStoreFilter').value) || '';
+      const useStore = storeFilter || histStore;
+
+      // 按店舖分組（用全部資料計算銷量，再篩選輸出）
+      const byStore = {};
+      all.forEach(r => {
+        if (!byStore[r.storeId]) byStore[r.storeId] = [];
+        byStore[r.storeId].push(r);
+      });
+      Object.keys(byStore).forEach(sid => {
+        byStore[sid].sort((a, b) => a.date.localeCompare(b.date));
+      });
+
+      let records = [...all].sort((a, b) => b.date.localeCompare(a.date) || a.storeName.localeCompare(b.storeName));
+      if (useStore) records = records.filter(r => r.storeId === useStore);
+
+      const prods = productFilter
+        ? PRODUCTS.filter(p => p.id === productFilter)
+        : PRODUCTS;
+
+      if (prods.length === 0) {
+        showToast('請選擇有效產品');
+        return;
+      }
+
+      const headers = ['日期', '店舖', ...prods.flatMap(p => {
+        const n = p.name.replace('益力多', '');
+        return [
+          `${n}-上次價錢`,
+          `${n}-上次總存`,
+          `${n}-現存`,
+          `${n}-銷量`,
+          `${n}-落貨`,
+          `${n}-現總存`
+        ];
+      })];
+
+      const rows = records.map(r => {
+        const row = [r.date, r.storeName];
+        const storeRecords = byStore[r.storeId] || [];
+        const idx = storeRecords.findIndex(x => x.date === r.date && x.storeId === r.storeId);
+        const prev = idx > 0 ? storeRecords[idx - 1] : null;
+
+        prods.forEach(p => {
+          const pr = r.products[p.id] || {};
+          const prevPr = prev && prev.products[p.id] ? prev.products[p.id] : null;
+
+          const lastPrice = prevPr && prevPr.price != null ? ('$' + prevPr.price) : '';
+          const lastTotal = prevPr ? getEffectiveStock(prevPr) : '';
+          const stock = pr.stock != null ? Number(pr.stock) : '';
+          let sold = '';
+          if (lastTotal !== '' && lastTotal != null && pr.stock != null) {
+            sold = Number(lastTotal) - Number(pr.stock);
+          }
+          const order = pr.order != null ? Number(pr.order) : '';
+          const currTotal = (pr.stock != null || pr.order != null)
+            ? (Number(pr.stock) || 0) + (Number(pr.order) || 0)
+            : '';
+
+          row.push(lastPrice, lastTotal ?? '', stock, sold, order, currTotal);
+        });
+        return row.map(v => `"${v}"`).join(',');
+      });
+
+      const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      let fname = '存貨管理記錄_' + todayStr();
+      if (useStore) {
+        const st = STORES.find(s => s.id === useStore);
+        if (st) fname += '_' + st.name.replace(/\s+/g, '');
+      }
+      if (productFilter) {
+        const pd = PRODUCTS.find(p => p.id === productFilter);
+        if (pd) fname += '_' + pd.name.replace('益力多','').replace(/\s+/g, '');
+      }
+      a.download = fname + '.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('CSV 已下載');
+    }
+
+    function exportJSON() {
+      const records = loadData();
+      const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `益力多備份_${todayStr()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('JSON 備份已下載');
+    }
+
+    function importJSON() {
+      $('importFile').click();
+    }
+
+    function handleImport(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (!Array.isArray(data)) throw new Error('格式錯誤');
+          const mode = confirm(
+            `將匯入 ${data.length} 筆記錄。\n\n` +
+            `按「確定」= 合併（同店同日會被新資料取代，其他保留）\n` +
+            `按「取消」= 不匯入`
+          );
+          if (!mode) return;
+          const existing = loadData();
+          const map = {};
+          existing.forEach(r => { map[r.storeId + '|' + r.date] = r; });
+          data.forEach(r => {
+            if (!r.storeId || !r.date) return;
+            map[r.storeId + '|' + r.date] = r;
+          });
+          const merged = Object.values(map).sort((a, b) =>
+            a.date.localeCompare(b.date) || (a.storeName || '').localeCompare(b.storeName || '')
+          );
+          saveData(merged);
+          showToast('已合併匯入，共 ' + merged.length + ' 筆');
+          renderHistory();
+        } catch (err) {
+          showToast('匯入失敗：檔案格式不正確');
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
+
+    function confirmClearAll() {
+      if (confirm('確定要清除所有記錄？此操作無法復原！')) {
+        if (confirm('再次確認：真的要刪除全部資料？')) {
+          localStorage.removeItem('yakult_records');
+          showToast('所有資料已清除');
+          renderHistory();
+          onStoreChange();
+        }
+      }
+    }
+
+    // ========== 頁面切換 ==========
+    function showPage(page) {
+      ['today', 'history', 'settings'].forEach(p => {
+        $(`page-${p}`).classList.toggle('hidden', p !== page);
+        $(`nav-${p}`).classList.toggle('active', p === page);
+      });
+      if (page === 'history') { fillExportFilters(); renderHistory(); }
+      if (page === 'settings') loadScheduleForm();
+    }
+
+
+    // ========== PWA 安裝與 Service Worker ==========
+    let deferredInstallPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      const ban = document.getElementById('installBanner');
+      const btn = document.getElementById('btnInstall');
+      if (ban) ban.style.display = 'block';
+      if (btn) btn.style.display = 'block';
+    });
+
+    function triggerInstall() {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.then(() => {
+        deferredInstallPrompt = null;
+        const ban = document.getElementById('installBanner');
+        if (ban) ban.style.display = 'none';
+      });
+    }
+
+    function showInstallHint() {
+      const ban = document.getElementById('installBanner');
+      const hint = document.getElementById('installHint');
+      if (!ban || !hint) return;
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+      if (isStandalone) {
+        ban.style.display = 'none';
+        return;
+      }
+      ban.style.display = 'block';
+      if (isIOS) {
+        hint.innerHTML = 'iPhone：點 Safari 底部分享按鈕 ⎋ →「加入主畫面」';
+      } else if (!deferredInstallPrompt) {
+        hint.innerHTML = 'Android Chrome：選單 ⋮ →「安裝應用程式」或「加到主畫面」';
+      }
+    }
+
+    // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    }
+
+    
+    document.addEventListener('DOMContentLoaded', showInstallHint);
+    setTimeout(showInstallHint, 800);
+
+    // 啟動
+    init();
+  </script>
+</body>
+</html>
