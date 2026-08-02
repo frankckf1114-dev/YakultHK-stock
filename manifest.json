@@ -1,6 +1,6 @@
 {
-  "name": "存貨管理",
-  "short_name": "存貨管理",
+  "name": "STH存貨管理",
+  "short_name": "STH存貨",
   "description": "Yakult 益力多每日存貨與落貨記錄",
   "start_url": "./",
   "display": "standalone",
