@@ -739,20 +739,53 @@
       const data = loadScheduleData();
       const prev = data[chain] && data[chain].prices ? data[chain].prices : {};
       // 合併價錢：新輸入覆蓋舊值，未填的保留舊設定
-      data[chain] = { effectiveDate, prices: { ...prev, ...prices } };
+      const mergedPrices = { ...prev, ...prices };
+      data[chain] = { effectiveDate, prices: mergedPrices };
       saveScheduleData(data);
+      // 同步更新歷史：該集團、日期 ≥ 生效日 的記錄價錢
+      const updatedCount = applyScheduleToHistory(chain, effectiveDate, mergedPrices);
       renderScheduleSummary();
       PRODUCTS.forEach(p => {
         const el = $(`sched-price-${p.id}`);
         if (el) el.value = '';
       });
       if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = getNextFridayStr();
-      // 若今日頁已選同集團店舖，即時刷新參考價錢
       const curStore = $('storeSelect') && $('storeSelect').value;
       if (curStore && getStoreChain(curStore) === chain) {
         onStoreChange();
       }
-      showToast(`${chain} 預計轉價已儲存（${effectiveDate} 起生效）`);
+      if ($('page-history') && !$('page-history').classList.contains('hidden')) {
+        renderHistory();
+      }
+      showToast(`${chain} 已儲存；已更新 ${updatedCount} 筆歷史價錢（${effectiveDate} 起）`);
+    }
+
+    // 將預計轉價寫入符合條件的歷史記錄
+    function applyScheduleToHistory(chain, effectiveDate, prices) {
+      if (!chain || !effectiveDate || !prices) return 0;
+      const all = loadData();
+      let count = 0;
+      all.forEach(r => {
+        if (getStoreChain(r.storeId) !== chain) return;
+        if (r.date < effectiveDate) return;
+        if (!r.products) r.products = {};
+        let changed = false;
+        PRODUCTS.forEach(p => {
+          if (prices[p.id] == null || prices[p.id] === '') return;
+          if (!r.products[p.id]) r.products[p.id] = {};
+          const newPrice = parseFloat(prices[p.id]);
+          if (r.products[p.id].price !== newPrice) {
+            r.products[p.id].price = newPrice;
+            changed = true;
+          }
+        });
+        if (changed) {
+          r.updatedAt = new Date().toISOString();
+          count++;
+        }
+      });
+      if (count > 0) saveData(all);
+      return count;
     }
 
     function renderScheduleSummary() {
