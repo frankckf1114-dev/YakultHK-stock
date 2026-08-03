@@ -1298,7 +1298,14 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (!ex) { map[k] = r; return; }
         const t1 = ex.updatedAt || '';
         const t2 = r.updatedAt || '';
-        map[k] = (t2 >= t1) ? r : ex;
+        const newer = (t2 >= t1) ? r : ex;
+        const older = (t2 >= t1) ? ex : r;
+        // 保留最早的首次記錄時間，避免改價／同步打亂歷史排序
+        const c1 = newer.createdAt || newer.updatedAt || '';
+        const c2 = older.createdAt || older.updatedAt || '';
+        let createdAt = c1;
+        if (c2 && (!c1 || c2 < c1)) createdAt = c2;
+        map[k] = Object.assign({}, newer, { createdAt: createdAt || newer.createdAt || newer.updatedAt });
       });
       // 已刪除嘅記錄：若 tombstone 時間 ≥ 記錄 updatedAt，唔再加返
       const deleted = loadDeletedKeys();
@@ -3203,12 +3210,19 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
 
       const idx = records.findIndex(r => r.storeId === storeId && r.date === date);
 
+      const nowIso = new Date().toISOString();
+      const prevRec = idx >= 0 ? records[idx] : null;
+      // createdAt：首次記錄時間，修改／轉價後不改，供歷史穩定排序
+      const createdAt = (prevRec && prevRec.createdAt)
+        ? prevRec.createdAt
+        : ((prevRec && prevRec.updatedAt) ? prevRec.updatedAt : nowIso);
       const record = {
         storeId,
         storeName: STORES.find(s => s.id === storeId).name,
         date,
         products,
-        updatedAt: new Date().toISOString()
+        createdAt: createdAt,
+        updatedAt: nowIso
       };
 
       const isUpdate = idx >= 0;
@@ -3259,10 +3273,11 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       const storeFilter = $('historyStoreFilter') ? $('historyStoreFilter').value : '';
       const dateFilter = $('historyDateFilter') ? $('historyDateFilter').value : '';
       let records = loadData().sort((a, b) => {
+        // 先按日期（新→舊），同日按首次記錄時間（新→舊），避免改價／修改打亂順序
         const dc = b.date.localeCompare(a.date);
         if (dc !== 0) return dc;
-        const ta = a.updatedAt || '';
-        const tb = b.updatedAt || '';
+        const ta = a.createdAt || a.updatedAt || '';
+        const tb = b.createdAt || b.updatedAt || '';
         if (ta || tb) return tb.localeCompare(ta);
         return (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
       });
