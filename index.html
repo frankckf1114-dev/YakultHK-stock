@@ -710,6 +710,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
     function saveExpiryData(data) {
       localStorage.setItem('yakult_expiry_by_date', JSON.stringify(data));
+      // 標記本機到期日較新，避免同步時被雲端舊資料合併返嚟
+      localStorage.setItem('yakult_expiry_updated_at', new Date().toISOString());
     }
     function getExpiryForDate(dateStr) {
       const all = loadExpiryData();
@@ -850,11 +852,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if ($('expiryHint')) $('expiryHint').textContent = '';
       }
       showToast('已清除 ' + dateStr + ' 到期日');
-      // 同步雲端（若有）
-      if (typeof pushToCloud === 'function') {
-        try { pushToCloud(); } catch (e) {}
-      } else if (typeof syncNow === 'function') {
-        try { syncNow(false); } catch (e) {}
+      // 優先上傳本機（preferPush），避免先拉雲端舊資料又合併返嚟
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
       }
     }
 
@@ -1204,9 +1204,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         localStorage.setItem('yakult_scheduled_prices', JSON.stringify(Object.assign({}, sch, payload.schedule)));
       }
       if (payload.expiry && typeof payload.expiry === 'object') {
-        let exp = {};
-        try { exp = JSON.parse(localStorage.getItem('yakult_expiry_by_date')||'{}'); } catch(e){}
-        localStorage.setItem('yakult_expiry_by_date', JSON.stringify(Object.assign({}, exp, payload.expiry)));
+        // 整份取代（唔用 Object.assign，否則刪除嘅日期會被雲端舊資料加返）
+        // 邊邊較新用邊邊：比較 meta / 本機戳記
+        const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
+        const localAt = localStorage.getItem('yakult_expiry_updated_at') || '';
+        if (!localAt || (remoteAt && remoteAt > localAt)) {
+          localStorage.setItem('yakult_expiry_by_date', JSON.stringify(payload.expiry));
+          if (remoteAt) localStorage.setItem('yakult_expiry_updated_at', remoteAt);
+        }
+        // 本機較新：保留本機，稍後上傳覆蓋雲端
       }
       return merged.length - before;
     }
@@ -1267,7 +1273,16 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         }
 
         const countBefore = loadData().length;
-        if (remotePayload) applyRemotePayload(remotePayload);
+        if (remotePayload) {
+          // preferPush：只合併記錄，到期日／轉價以本機為準（例如剛清除）
+          if (preferPush) {
+            const local = loadData();
+            const merged = mergeRecords(local, remotePayload.records || []);
+            localStorage.setItem('yakult_records', JSON.stringify(merged));
+          } else {
+            applyRemotePayload(remotePayload);
+          }
+        }
         const countAfter = loadData().length;
         const remoteNewer = remoteStamp && remoteStamp !== _lastRemoteStamp;
         if (remoteNewer) _lastRemoteStamp = remoteStamp;
