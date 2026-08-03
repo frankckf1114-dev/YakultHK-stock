@@ -681,26 +681,38 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return prodId === '10pack' ? 10 : 20;
     }
 
-    // 兩排特價：五支裝 >20（如$25兩排）、LT >29（如$30兩排）
-    function isMultiBuyPrice(prodId, price) {
-      if (price == null || isNaN(price)) return false;
+    // 多排特價：
+    // 五支裝：>20 且 ≤30 → 兩排（如$25）；>30 → 三排（如$33）
+    // LT：>29 → 兩排（如$30）
+    function multiBuyRows(prodId, price) {
+      if (price == null || isNaN(parseFloat(price))) return 1;
       const v = parseFloat(price);
-      if (prodId === '5pack') return v > 20;
-      if (prodId === 'lt') return v > 29;
-      return false;
+      if (prodId === '5pack') {
+        if (v > 30) return 3;
+        if (v > 20) return 2;
+        return 1;
+      }
+      if (prodId === 'lt' && v > 29) return 2;
+      return 1;
     }
-    // 顯示用：$25（兩排）
+    function isMultiBuyPrice(prodId, price) {
+      return multiBuyRows(prodId, price) > 1;
+    }
+    // 顯示用：$25（兩排）、$33（三排）
     function formatPriceLabel(prodId, price) {
       if (price == null || price === '' || isNaN(parseFloat(price))) return '—';
       const v = parseFloat(price);
-      if (isMultiBuyPrice(prodId, v)) return '$' + v + '（兩排）';
+      const rows = multiBuyRows(prodId, v);
+      if (rows === 3) return '$' + v + '（三排）';
+      if (rows === 2) return '$' + v + '（兩排）';
       return '$' + v;
     }
-    // 單排等值價（兩排特價 ÷2），方便理解與比對
+    // 單排等值價（多排特價 ÷ 排數）
     function unitPriceEquiv(prodId, price) {
       if (price == null || isNaN(parseFloat(price))) return null;
       const v = parseFloat(price);
-      if (isMultiBuyPrice(prodId, v)) return Math.round((v / 2) * 10) / 10;
+      const rows = multiBuyRows(prodId, v);
+      if (rows > 1) return Math.round((v / rows) * 10) / 10;
       return v;
     }
 
