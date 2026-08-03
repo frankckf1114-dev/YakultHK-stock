@@ -426,12 +426,6 @@
             <input type="date" id="historyDateFilter" onchange="renderHistory()">
           </div>
         </div>
-        <div style="margin-top:8px;">
-          <label>匯出產品（可選）</label>
-          <select id="historyProductFilter">
-            <option value="">全部產品</option>
-          </select>
-        </div>
         <div class="btn-group" style="margin-top:8px;">
           <button class="btn btn-secondary" onclick="clearHistoryFilters()">清除篩選</button>
         </div>
@@ -510,6 +504,22 @@
         <div id="schedulePrices"></div>
         <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
         <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
+      </div>
+      <div class="card" id="discountCard">
+        <div class="card-title">🏷 全店折扣日</div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
+          全店大折／特別好賣的日子。到下次到店前若包含折扣日，建議落貨會按倍數上調（唔知邊隻特價都一律調整）。
+        </p>
+        <div id="discountList" style="font-size:0.78rem;margin-bottom:10px;"></div>
+        <div style="margin-bottom:10px;">
+          <label>新增折扣日</label>
+          <input type="date" id="discountDateInput">
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>銷量倍數（預設 1.8）</label>
+          <input type="number" id="discountMultiplier" min="1" max="5" step="0.1" placeholder="1.8">
+        </div>
+        <button class="btn btn-primary" onclick="addDiscountDay()">加入折扣日</button>
       </div>
       <div class="card">
         <div class="card-title">通知</div>
@@ -1187,6 +1197,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         records: loadData(),
         schedule: (function(){ try { return JSON.parse(localStorage.getItem('yakult_scheduled_prices')||'{}'); } catch(e){ return {}; } })(),
         expiry: (function(){ try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date')||'{}'); } catch(e){ return {}; } })(),
+        discountDays: loadDiscountDays(),
+        discountMult: getDiscountMultiplier(),
         meta: {
           updatedBy: s.name || 'unknown',
           updatedAt: new Date().toISOString()
@@ -1206,15 +1218,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         localStorage.setItem('yakult_scheduled_prices', JSON.stringify(Object.assign({}, sch, payload.schedule)));
       }
       if (payload.expiry && typeof payload.expiry === 'object') {
-        // 整份取代（唔用 Object.assign，否則刪除嘅日期會被雲端舊資料加返）
-        // 邊邊較新用邊邊：比較 meta / 本機戳記
         const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
         const localAt = localStorage.getItem('yakult_expiry_updated_at') || '';
         if (!localAt || (remoteAt && remoteAt > localAt)) {
           localStorage.setItem('yakult_expiry_by_date', JSON.stringify(payload.expiry));
           if (remoteAt) localStorage.setItem('yakult_expiry_updated_at', remoteAt);
         }
-        // 本機較新：保留本機，稍後上傳覆蓋雲端
+      }
+      if (Array.isArray(payload.discountDays)) {
+        const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
+        const localAt = localStorage.getItem('yakult_discount_updated_at') || '';
+        if (!localAt || (remoteAt && remoteAt > localAt)) {
+          saveDiscountDays(payload.discountDays);
+          if (payload.discountMult) setDiscountMultiplier(payload.discountMult);
+          if (remoteAt) localStorage.setItem('yakult_discount_updated_at', remoteAt);
+        }
       }
       return merged.length - before;
     }
@@ -2003,6 +2021,93 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return sales;
     }
 
+    // 計算兩日之間（不含起日、含終日）有多少平日／周末
+    function countWeekdayWeekend(fromDateStr, toDateStr) {
+      const from = new Date(fromDateStr + 'T12:00:00');
+      const to = new Date(toDateStr + 'T12:00:00');
+      let wd = 0, we = 0;
+      const d = new Date(from);
+      d.setDate(d.getDate() + 1);
+      while (d <= to) {
+        const day = d.getDay();
+        if (day === 0 || day === 6) we++;
+        else wd++;
+        d.setDate(d.getDate() + 1);
+      }
+      return { weekday: wd, weekend: we, total: wd + we };
+    }
+
+    // 分析本店同價歷史：周末是否較好賣／平日較好賣／平穩
+    // 回傳日均銷量（平日 vs 周末）及 pattern
+    function analyzeWeekdayWeekendSales(storeId, prodId, targetPrice, beforeDate) {
+      if (targetPrice == null || isNaN(targetPrice)) return null;
+      const storeRecs = loadData()
+        .filter(r => r.storeId === storeId && r.date < beforeDate)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      let wdSold = 0, wdDays = 0, weSold = 0, weDays = 0;
+      let samples = 0;
+      for (let i = 1; i < storeRecs.length; i++) {
+        const prev = storeRecs[i - 1].products[prodId];
+        const curr = storeRecs[i].products[prodId];
+        if (!prev || prev.stock == null || !curr || curr.stock == null) continue;
+        const periodPrice = prev.price != null ? Number(prev.price) : null;
+        if (periodPrice == null) continue;
+        if (Math.abs(periodPrice - targetPrice) > 1.01) continue;
+        const effectivePrev = getEffectiveStock(prev);
+        if (effectivePrev == null) continue;
+        const sold = effectivePrev - Number(curr.stock);
+        if (sold < 0) continue;
+        const gapInfo = countWeekdayWeekend(storeRecs[i - 1].date, storeRecs[i].date);
+        if (gapInfo.total <= 0 || gapInfo.total > 21) continue;
+        // 按該段內平日／周末日數比例分攤銷量
+        const daily = sold / gapInfo.total;
+        if (gapInfo.weekday > 0) {
+          wdSold += daily * gapInfo.weekday;
+          wdDays += gapInfo.weekday;
+        }
+        if (gapInfo.weekend > 0) {
+          weSold += daily * gapInfo.weekend;
+          weDays += gapInfo.weekend;
+        }
+        // 若整段幾乎全是平日或全是周末，額外累積一次「純」樣本（同一日均再加權已足夠）
+        samples++;
+      }
+      if (samples < 2) return null;
+
+      const weekdayDaily = wdDays > 0 ? wdSold / wdDays : null;
+      const weekendDaily = weDays > 0 ? weSold / weDays : null;
+      if (weekdayDaily == null && weekendDaily == null) return null;
+
+      let pattern = 'stable';
+      let ratio = 1;
+      if (weekdayDaily != null && weekendDaily != null && weekdayDaily > 0.1) {
+        ratio = weekendDaily / weekdayDaily;
+        if (ratio >= 1.2) pattern = 'weekend';       // 周末好賣
+        else if (ratio <= 0.85) pattern = 'weekday'; // 平日好賣
+        else pattern = 'stable';
+      } else if (weekendDaily != null && weekdayDaily == null) {
+        pattern = 'weekend';
+      } else if (weekdayDaily != null && weekendDaily == null) {
+        pattern = 'weekday';
+      }
+
+      const overallDaily = (wdDays + weDays) > 0
+        ? (wdSold + weSold) / (wdDays + weDays)
+        : null;
+
+      return {
+        pattern: pattern,
+        ratio: ratio,
+        weekdayDaily: weekdayDaily,
+        weekendDaily: weekendDaily,
+        overallDaily: overallDaily,
+        samples: samples,
+        wdDays: wdDays,
+        weDays: weDays
+      };
+    }
+
     // 預計銷量：該店在相近售價下的歷史平均「每段到店間隔」銷量
     function getExpectedSalesByPrice(storeId, prodId, targetPrice, beforeDate) {
       if (targetPrice == null || isNaN(targetPrice)) return null;
@@ -2024,7 +2129,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (gap > 0 && gap < 30) { gapSum += gap; gapN++; }
       }
       const avgGap = gapN > 0 ? gapSum / gapN : null;
-      return { avg: avg, count: sales.length, avgGap };
+      const dayProfile = analyzeWeekdayWeekendSales(storeId, prodId, targetPrice, beforeDate);
+      return { avg: avg, count: sales.length, avgGap: avgGap, dayProfile: dayProfile };
     }
 
     // 取得店舖到訪星期（可被 localStorage 覆蓋）
@@ -2276,6 +2382,101 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return data[chain] || null;
     }
 
+    // ========== 全店折扣日 ==========
+    function loadDiscountDays() {
+      try {
+        const raw = localStorage.getItem('yakult_discount_days');
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort() : [];
+      } catch (e) { return []; }
+    }
+    function saveDiscountDays(arr) {
+      localStorage.setItem('yakult_discount_days', JSON.stringify(arr));
+      localStorage.setItem('yakult_discount_updated_at', new Date().toISOString());
+    }
+    function getDiscountMultiplier() {
+      try {
+        const v = parseFloat(localStorage.getItem('yakult_discount_mult'));
+        if (!isNaN(v) && v >= 1 && v <= 5) return v;
+      } catch (e) {}
+      return 1.8;
+    }
+    function setDiscountMultiplier(v) {
+      const n = parseFloat(v);
+      if (!isNaN(n) && n >= 1 && n <= 5) {
+        localStorage.setItem('yakult_discount_mult', String(n));
+      }
+    }
+    function renderDiscountList() {
+      const el = $('discountList');
+      if (!el) return;
+      const days = loadDiscountDays();
+      const mult = getDiscountMultiplier();
+      if ($('discountMultiplier') && !$('discountMultiplier').value) {
+        $('discountMultiplier').value = mult;
+      }
+      if (!days.length) {
+        el.innerHTML = '<span style="color:#999;">尚未設定全店折扣日</span>';
+        return;
+      }
+      const today = todayStr();
+      el.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">已設定（倍數 ×' + mult + '）：</div>' +
+        days.map(d => {
+          const past = d < today;
+          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f0;">' +
+            '<span style="' + (past ? 'color:#999;' : '') + '"><b>' + d + '</b>' +
+            (past ? '（已過）' : (d === today ? '（今日）' : '')) + '</span>' +
+            '<button type="button" class="btn" style="width:auto;padding:4px 10px;font-size:0.75rem;background:#dc3545;color:#fff;" ' +
+            'onclick="removeDiscountDay(\'' + d + '\')">刪除</button></div>';
+        }).join('');
+    }
+    function addDiscountDay() {
+      const input = $('discountDateInput');
+      if (!input || !input.value) {
+        showToast('請選擇日期');
+        return;
+      }
+      const d = input.value;
+      if ($('discountMultiplier') && $('discountMultiplier').value) {
+        setDiscountMultiplier($('discountMultiplier').value);
+      }
+      let days = loadDiscountDays();
+      if (days.indexOf(d) >= 0) {
+        showToast('此日期已在列表');
+        return;
+      }
+      days.push(d);
+      days.sort();
+      saveDiscountDays(days);
+      input.value = '';
+      renderDiscountList();
+      showToast('已加入折扣日 ' + d);
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
+      }
+      // 重算建議
+      if (typeof PRODUCTS !== 'undefined') {
+        PRODUCTS.forEach(p => { try { calcSuggest(p.id); } catch (e) {} });
+      }
+    }
+    function removeDiscountDay(d) {
+      if (!confirm('刪除折扣日 ' + d + '？')) return;
+      let days = loadDiscountDays().filter(x => x !== d);
+      saveDiscountDays(days);
+      renderDiscountList();
+      showToast('已刪除');
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
+      }
+      if (typeof PRODUCTS !== 'undefined') {
+        PRODUCTS.forEach(p => { try { calcSuggest(p.id); } catch (e) {} });
+      }
+    }
+    // 由 from（不含）到 to（含）之間有冇折扣日
+    function discountDaysInRange(fromDateStr, toDateStr) {
+      return loadDiscountDays().filter(d => d > fromDateStr && d <= toDateStr);
+    }
+
     function calcSuggest(prodId) {
       const lastText = $(`last-${prodId}`).textContent;
       const lastStock = lastText === '—' ? null : parseInt(lastText, 10);
@@ -2336,6 +2537,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
       let expectedUntilNext = null;
       let dailyRate = null;
+      let dayPatternNote = '';
+      let dayProfile = null;
       if (targetPrice != null) {
         const expected = getExpectedSalesByPrice(storeId, prodId, targetPrice, date);
         if (expected && expected.count > 0) {
@@ -2345,6 +2548,27 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           } else {
             expectedUntilNext = expected.avg * (daysNext / 3);
             dailyRate = expected.avg / 3;
+          }
+          // 本店平日／周末差異：用下一段實際日曆組成加權
+          dayProfile = expected.dayProfile;
+          if (dayProfile && dayProfile.overallDaily != null) {
+            const nextDate = new Date(date + 'T12:00:00');
+            nextDate.setDate(nextDate.getDate() + daysNext);
+            const nextStr = formatLocalDate(nextDate);
+            const mix = countWeekdayWeekend(date, nextStr);
+            const wdD = dayProfile.weekdayDaily != null ? dayProfile.weekdayDaily : dayProfile.overallDaily;
+            const weD = dayProfile.weekendDaily != null ? dayProfile.weekendDaily : dayProfile.overallDaily;
+            if (mix.total > 0 && (dayProfile.pattern !== 'stable' || (mix.weekend > 0 && mix.weekday > 0))) {
+              expectedUntilNext = wdD * mix.weekday + weD * mix.weekend;
+              dailyRate = expectedUntilNext / mix.total;
+            }
+            if (dayProfile.pattern === 'weekend') {
+              dayPatternNote = '本店周末較好賣（約 ' + Math.round(dayProfile.ratio * 100) + '% 平日）';
+            } else if (dayProfile.pattern === 'weekday') {
+              dayPatternNote = '本店平日較好賣（周末約 ' + Math.round(dayProfile.ratio * 100) + '% 平日）';
+            } else {
+              dayPatternNote = '本店平日／周末銷量較平穩';
+            }
           }
         }
       }
@@ -2358,6 +2582,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if (expectedUntilNext != null && freshFactor < 1) {
         expectedUntilNext = expectedUntilNext * freshFactor;
         if (dailyRate != null) dailyRate = dailyRate * freshFactor;
+      }
+
+      // 全店折扣日：下次到店前若有折扣日，預計銷量 × 倍數（未知邊隻特價，全產品一併調整）
+      let discountNote = '';
+      let discountMult = 1;
+      const discInRange = discountDaysInRange(date, (function() {
+        const nd = new Date(date + 'T12:00:00');
+        nd.setDate(nd.getDate() + daysNext);
+        return formatLocalDate(nd);
+      })());
+      if (discInRange.length && expectedUntilNext != null && !mustExchange(remainToday)) {
+        discountMult = getDiscountMultiplier();
+        expectedUntilNext = expectedUntilNext * discountMult;
+        if (dailyRate != null) dailyRate = dailyRate * discountMult;
+        discountNote = '含全店折扣日 ' + discInRange.join('、') + '，預計 ×' + discountMult;
       }
 
       // 最低安全庫存：一般 ≥20、十支裝 ≥10（不可再降低）
@@ -2422,7 +2661,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         storeId: storeId,
         date: date,
         lastStock: lastStock,
-        expNote: expNote || ''
+        expNote: expNote || '',
+        dayPatternNote: dayPatternNote || '',
+        dayProfile: dayProfile,
+        discountNote: discountNote || '',
+        discountMult: discountMult,
+        discountDays: discInRange || []
       };
 
       // 建議欄只顯示條數；原因詳見 ?
@@ -2442,36 +2686,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if (m) { m.style.display = 'none'; }
     }
 
-    async function fetchHkWeatherBrief() {
-      // 香港天文台公開資料（簡要）；失敗則返回 null
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch('https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc', { signal: ctrl.signal });
-        clearTimeout(t);
-        if (!res.ok) return null;
-        const data = await res.json();
-        const parts = [];
-        if (data.warningMessage && data.warningMessage.length) {
-          parts.push('天氣警告：' + data.warningMessage.slice(0, 3).join('；'));
-        }
-        if (data.rainfall && data.rainfall.data) {
-          const maxRain = Math.max(0, ...data.rainfall.data.map(x => x.max || 0));
-          if (maxRain >= 10) parts.push('連日／現時有較大雨量（最高約 ' + maxRain + ' mm），市民或減少外出');
-        }
-        if (data.icon && data.icon.length) {
-          // 雨／暴雨 icon 常見 62-65, 53-54 等
-          const rainy = data.icon.some(i => [53,54,62,63,64,65].includes(Number(i)));
-          if (rainy) parts.push('現時天氣偏雨，超市客流可能較平日低');
-        }
-        if (data.uvindex && data.uvindex.data && data.uvindex.data[0]) {
-          /* ignore */
-        }
-        return parts.length ? parts.join('。') + '。' : '現時無特別惡劣天氣警告（仍請留意最新天文台資訊）。';
-      } catch (e) {
-        return null;
-      }
-    }
 
     async function showSuggestDetail(prodId) {
       const sug = lastSuggestPacks[prodId];
@@ -2511,8 +2725,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         }
       }
 
-      const weatherText = await fetchHkWeatherBrief();
-
       if (!sug) {
         body.innerHTML = `<div><strong>${pname}</strong></div><div style="margin-top:8px;">請先選擇店舖並填寫今次存貨，才能計算建議。</div>`;
         return;
@@ -2540,7 +2752,34 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       lines.push('</div>');
 
       lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">③ 到期日／新鮮度</div>');
+      lines.push('<div style="font-weight:600;margin-bottom:6px;">③ 平日／周末</div>');
+      if (sug.dayPatternNote) {
+        lines.push(`<div>${sug.dayPatternNote}</div>`);
+        if (sug.dayProfile) {
+          const dp = sug.dayProfile;
+          if (dp.weekdayDaily != null)
+            lines.push(`<div>平日日均約 <strong>${Math.round(dp.weekdayDaily * 10) / 10}</strong></div>`);
+          if (dp.weekendDaily != null)
+            lines.push(`<div>周末日均約 <strong>${Math.round(dp.weekendDaily * 10) / 10}</strong></div>`);
+        }
+        lines.push('<div style="font-size:0.85rem;color:var(--muted);">已按下次到店前的實際平日／周末日數加權預計銷量。</div>');
+      } else {
+        lines.push('<div style="color:var(--muted);">歷史樣本不足，暫不區分平日／周末。</div>');
+      }
+      lines.push('</div>');
+
+      lines.push('<div style="background:#fff8e1;border-radius:10px;padding:10px;margin-bottom:10px;">');
+      lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 全店折扣日</div>');
+      if (sug.discountNote) {
+        lines.push(`<div style="color:var(--primary);font-weight:600;">${sug.discountNote}</div>`);
+        lines.push('<div style="font-size:0.85rem;color:var(--muted);">因未確定邊隻產品特價，全部產品預計銷量同一倍數上調。</div>');
+      } else {
+        lines.push('<div style="color:var(--muted);">下次到店前無全店折扣日（可在設定新增）。</div>');
+      }
+      lines.push('</div>');
+
+      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
+      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑤ 到期日／新鮮度</div>');
       if (sug.remainToday != null) {
         lines.push(`<div>今日出貨剩餘：<strong>${sug.remainToday}</strong> 日${sug.remainToday <= 7 ? '（須報交換）' : ''}</div>`);
         if (sug.remainNext != null) lines.push(`<div>下次到店時約剩餘：<strong>${sug.remainNext}</strong> 日</div>`);
@@ -2551,24 +2790,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       lines.push('</div>');
 
       lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 公式</div>');
+      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑥ 公式</div>');
       lines.push(`<div>需要量 ≈ 預計到下次銷量 + 安全庫存 = <strong>${Math.round((sug.expectedUntilNext || 0) + (sug.minBuf || 0))}</strong></div>`);
       lines.push(`<div>建議排數 = 需要量 − 今次存貨 → 再四捨五入成整條（${unit} 排/條）</div>`);
       lines.push(`<div>結果：<strong>${sug.strips} 條</strong></div>`);
       lines.push('</div>');
 
-      lines.push('<div style="background:#fff8e1;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑤ 天氣／出行（香港）</div>');
-      if (weatherText) {
-        lines.push(`<div>${weatherText}</div>`);
-      } else {
-        lines.push('<div style="color:var(--muted);">未能讀取天文台資料（可離線使用）。</div>');
-      }
-      lines.push('<div style="font-size:0.85rem;margin-top:6px;color:var(--muted);">若連日大雨、颱風、黑色暴雨或八號風球，市民出行減少，實際銷量往往低於歷史平均，可酌情少落。</div>');
-      lines.push('<div style="font-size:0.85rem;color:var(--muted);">相反，假日／派錢／超市大促期間客流較高，可考慮略多於建議。</div>');
-      lines.push('</div>');
-
-      lines.push('<div style="font-size:0.8rem;color:var(--muted);">此建議綜合：車期、同價銷量、安全庫存、到期日、轉價風險。最終請以現場情況為準。</div>');
+      lines.push('<div style="font-size:0.8rem;color:var(--muted);">此建議綜合：車期、同價銷量、平日／周末、全店折扣日倍數、安全庫存、到期日、轉價風險。最終請以現場情況為準。</div>');
 
       body.innerHTML = lines.join('');
     }
@@ -2815,9 +3043,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     function renderHistory() {
-      const storeFilter = $('historyStoreFilter').value;
-      const dateFilter = $('historyDateFilter').value;
-      // 先按日期（新→舊），同一日按儲存時間（新→舊）
+      const storeFilter = $('historyStoreFilter') ? $('historyStoreFilter').value : '';
+      const dateFilter = $('historyDateFilter') ? $('historyDateFilter').value : '';
       let records = loadData().sort((a, b) => {
         const dc = b.date.localeCompare(a.date);
         if (dc !== 0) return dc;
@@ -2826,7 +3053,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (ta || tb) return tb.localeCompare(ta);
         return (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
       });
-
       if (storeFilter) records = records.filter(r => r.storeId === storeFilter);
       if (dateFilter) records = records.filter(r => r.date === dateFilter);
 
@@ -2844,33 +3070,32 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           const order = pr.order != null ? Number(pr.order) : 0;
           const total = stock != null ? stock + order : (pr.order != null ? order : null);
           const parts = [];
-          parts.push(`存${stock != null ? stock : '—'}`);
-          parts.push(`落${order}`);
-          parts.push(`總${total != null ? total : '—'}`);
+          parts.push('存' + (stock != null ? stock : '—'));
+          parts.push('落' + order);
+          parts.push('總' + (total != null ? total : '—'));
           parts.push(pr.price != null ? formatPriceLabel(p.id, pr.price) : '價—');
-          return `<div><strong>${p.name.replace('益力多','')}</strong>：${parts.join(' / ')}</div>`;
+          return '<div><strong>' + p.name.replace('益力多','') + '</strong>：' + parts.join(' / ') + '</div>';
         }).filter(Boolean).join('');
 
-        return `
-          <div class="history-item">
-            <div class="history-header">
-              <span>${r.storeName}</span>
-              <span class="history-date">${r.date}</span>
-            </div>
-            <div class="history-detail">${items || '（無詳細資料）'}</div>
-            <div style="margin-top:8px;">
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="loadRecordToForm('${r.storeId}','${r.date}')">載入修改</button>
-              <button class="btn" style="padding:6px 12px; font-size:0.85rem; width:auto; background:#dc3545; color:white; margin-left:6px;" onclick="deleteRecord('${r.storeId}','${r.date}')">刪除</button>
-            </div>
-          </div>
-        `;
+        return (
+          '<div class="history-item">' +
+            '<div class="history-header">' +
+              '<span>' + r.storeName + '</span>' +
+              '<span class="history-date">' + r.date + '</span>' +
+            '</div>' +
+            '<div class="history-detail">' + (items || '（無詳細資料）') + '</div>' +
+            '<div style="margin-top:8px;">' +
+              '<button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="loadRecordToForm(\'' + r.storeId + '\',\'' + r.date + '\')">載入修改</button>' +
+              '<button class="btn" style="padding:6px 12px; font-size:0.85rem; width:auto; background:#dc3545; color:white; margin-left:6px;" onclick="deleteRecord(\'' + r.storeId + '\',\'' + r.date + '\')">刪除</button>' +
+            '</div>' +
+          '</div>'
+        );
       }).join('');
     }
 
     function clearHistoryFilters() {
       if ($('historyStoreFilter')) $('historyStoreFilter').value = '';
       if ($('historyDateFilter')) $('historyDateFilter').value = '';
-      if ($('historyProductFilter')) $('historyProductFilter').value = '';
       renderHistory();
     }
 
@@ -2895,7 +3120,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function fillExportFilters() {
       const storeSel = $('exportStoreFilter');
       const prodSel = $('exportProductFilter');
-      const histProd = $('historyProductFilter');
       const opts = '<option value="">全部產品</option>' +
         PRODUCTS.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
       if (storeSel) {
@@ -2908,11 +3132,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const curP = prodSel.value;
         prodSel.innerHTML = opts;
         prodSel.value = curP;
-      }
-      if (histProd) {
-        const curH = histProd.value;
-        histProd.innerHTML = opts;
-        histProd.value = curH;
       }
     }
 
@@ -3312,8 +3531,24 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         sumBody += '<td>' + escapeXml(lastDate) + '</td>';
         sumBody += '</tr>';
       });
+      // 各產品合計銷量／落貨
+      const prodSalesTot = {};
+      const prodOrderTot = {};
+      PRODUCTS.forEach(p => { prodSalesTot[p.id] = 0; prodOrderTot[p.id] = 0; });
+      storeIds.forEach(sid => {
+        const s = summary[sid];
+        PRODUCTS.forEach(p => {
+          const ag = s.products[p.id];
+          if (!ag) return;
+          prodSalesTot[p.id] += Math.round(ag.sales || 0);
+          prodOrderTot[p.id] += Math.round(ag.order || 0);
+        });
+      });
       sumBody += '<tr class="grand"><td colspan="3"><b>合計</b></td>';
-      PRODUCTS.forEach(() => { sumBody += '<td></td><td></td>'; });
+      PRODUCTS.forEach(p => {
+        sumBody += '<td class="num"><b>' + prodSalesTot[p.id] + '</b></td>';
+        sumBody += '<td class="num"><b>' + prodOrderTot[p.id] + '</b></td>';
+      });
       sumBody += '<td class="num total"><b>' + grandSales + '</b></td>';
       sumBody += '<td class="num ' + pctClass(grandSales, grandMom) + '"><b>' + formatPctChange(grandSales, grandMom) + '</b></td>';
       sumBody += '<td class="num ' + pctClass(grandSales, grandYoy) + '"><b>' + formatPctChange(grandSales, grandYoy) + '</b></td>';
@@ -3341,6 +3576,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         detRows += '<td class="num">' + d.stock + '</td>';
         detRows += '<td class="num ' + salesCls + '">' + d.sales + '</td>';
         detRows += '<td class="num">' + d.order + '</td>';
+        detRows += '<td class="num">' + (d.total != null && d.total !== '' ? d.total : '') + '</td>';
         detRows += '<td>' + escapeXml(d.price) + '</td>';
         detRows += '</tr>';
       });
@@ -3401,7 +3637,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
   <h2>二、每日明細</h2>
   <table>
     <thead>
-      <tr><th>日期</th><th>店舖</th><th>產品</th><th>現存</th><th>銷量</th><th>落貨</th><th>售價</th></tr>
+      <tr><th>日期</th><th>店舖</th><th>產品</th><th>現存</th><th>銷量</th><th>落貨</th><th>總存</th><th>售價</th></tr>
     </thead>
     <tbody>${detRows}</tbody>
   </table>
@@ -3429,9 +3665,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
 
       const storeFilter = ($('exportStoreFilter') && $('exportStoreFilter').value) || '';
-      const productFilter = ($('exportProductFilter') && $('exportProductFilter').value)
-        || ($('historyProductFilter') && $('historyProductFilter').value)
-        || '';
+      const productFilter = ($('exportProductFilter') && $('exportProductFilter').value) || '';
       // 歷史頁若有店舖篩選，可沿用
       const histStore = ($('historyStoreFilter') && $('historyStoreFilter').value) || '';
       const useStore = storeFilter || histStore;
@@ -3588,7 +3822,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         $(`page-${p}`).classList.toggle('hidden', p !== page);
         $(`nav-${p}`).classList.toggle('active', p === page);
       });
-      if (page === 'history') { fillExportFilters(); renderHistory(); }
+      if (page === 'history') {
+        renderHistory();
+      }
       if (page === 'settings') {
       loadScheduleForm();
       _expiryEditMode = false;
@@ -3598,6 +3834,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if ($('expiryHint')) $('expiryHint').textContent = '';
       if ($('expiryDateLabel')) $('expiryDateLabel').textContent = '適用日期（新輸入）';
       if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
+      if (typeof renderDiscountList === 'function') renderDiscountList();
     }
     }
 
