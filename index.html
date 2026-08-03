@@ -534,6 +534,38 @@
         <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
         <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
       </div>
+      <div class="card" id="storeDiscountLogCard">
+        <div class="card-title">🏷 全店折扣記錄（參考用）</div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
+          記錄全店折扣日（例如全店 88 折）。下次到店時，若該段銷量期間包含折扣，銷量旁將顯示 🏷 標記。<strong>此記錄不會自動調整建議落貨數量。</strong>
+        </p>
+        <div id="storeDiscountLogList" style="font-size:0.78rem;margin-bottom:10px;"></div>
+        <div style="margin-bottom:8px;">
+          <label>日期</label>
+          <input type="date" id="sdlDate">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>集團</label>
+          <select id="sdlChain">
+            <option value="全部">全部</option>
+            <option value="惠康">惠康</option>
+            <option value="百佳">百佳</option>
+            <option value="一田">一田</option>
+            <option value="Aeon">Aeon</option>
+            <option value="Donki">Donki</option>
+            <option value="佳寶">佳寶</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>折扣</label>
+          <input type="text" id="sdlLabel" placeholder="例如：全店88折 / 全店8折" maxlength="40">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>備註（可選）</label>
+          <input type="text" id="sdlNote" placeholder="可留空" maxlength="80">
+        </div>
+        <button class="btn btn-primary" onclick="addStoreDiscountLog()">加入記錄</button>
+      </div>
       <div class="card">
         <div class="card-title">通知</div>
         <p style="font-size:0.85rem;color:var(--muted);margin-bottom:10px;">
@@ -1196,6 +1228,34 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
     let _visHandlerBound = false;
 
+    function loadDeletedKeys() {
+      try {
+        const raw = localStorage.getItem('yakult_deleted_keys');
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) { return {}; }
+    }
+    function saveDeletedKeys(map) {
+      localStorage.setItem('yakult_deleted_keys', JSON.stringify(map || {}));
+    }
+    function markRecordDeleted(storeId, date) {
+      const m = loadDeletedKeys();
+      m[storeId + '|' + date] = new Date().toISOString();
+      saveDeletedKeys(m);
+    }
+    function clearDeletedKey(storeId, date) {
+      const m = loadDeletedKeys();
+      const k = storeId + '|' + date;
+      if (m[k]) { delete m[k]; saveDeletedKeys(m); }
+    }
+    function mergeDeletedKeys(localMap, remoteMap) {
+      const out = Object.assign({}, localMap || {});
+      Object.keys(remoteMap || {}).forEach(k => {
+        const rt = remoteMap[k] || '';
+        const lt = out[k] || '';
+        if (!lt || rt > lt) out[k] = rt;
+      });
+      return out;
+    }
     function mergeRecords(localArr, remoteArr) {
       const map = {};
       (remoteArr || []).forEach(r => {
@@ -1211,6 +1271,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const t2 = r.updatedAt || '';
         map[k] = (t2 >= t1) ? r : ex;
       });
+      // 已刪除嘅記錄：若 tombstone 時間 ≥ 記錄 updatedAt，唔再加返
+      const deleted = loadDeletedKeys();
+      Object.keys(deleted).forEach(k => {
+        const rec = map[k];
+        if (!rec) return;
+        const delAt = deleted[k] || '';
+        const upd = rec.updatedAt || '';
+        if (delAt >= upd) delete map[k];
+      });
       return Object.values(map).sort((a, b) =>
         a.date.localeCompare(b.date) || (a.storeName || '').localeCompare(b.storeName || '')
       );
@@ -1222,6 +1291,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         records: loadData(),
         schedule: (function(){ try { return JSON.parse(localStorage.getItem('yakult_scheduled_prices')||'{}'); } catch(e){ return {}; } })(),
         expiry: (function(){ try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date')||'{}'); } catch(e){ return {}; } })(),
+        storeDiscountLogs: loadStoreDiscountLogs(),
+        deletedKeys: loadDeletedKeys(),
         meta: {
           updatedBy: s.name || 'unknown',
           updatedAt: new Date().toISOString()
@@ -1231,6 +1302,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function applyRemotePayload(payload) {
       if (!payload || typeof payload !== 'object') return 0;
+      if (payload.deletedKeys && typeof payload.deletedKeys === 'object') {
+        saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), payload.deletedKeys));
+      }
       const local = loadData();
       const merged = mergeRecords(local, payload.records || []);
       const before = local.length;
@@ -1250,6 +1324,14 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (!localAt || (remoteAt && remoteAt > localAt)) {
           localStorage.setItem('yakult_expiry_by_date', JSON.stringify(payload.expiry));
           if (remoteAt) localStorage.setItem('yakult_expiry_updated_at', remoteAt);
+        }
+      }
+      if (Array.isArray(payload.storeDiscountLogs)) {
+        const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
+        const localAt = localStorage.getItem('yakult_store_discount_logs_at') || '';
+        if (!localAt || (remoteAt && remoteAt > localAt)) {
+          saveStoreDiscountLogs(payload.storeDiscountLogs);
+          if (remoteAt) localStorage.setItem('yakult_store_discount_logs_at', remoteAt);
         }
       }
       return merged.length - before;
@@ -1314,9 +1396,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (remotePayload) {
           // preferPush：只合併記錄，到期日／轉價以本機為準（例如剛清除）
           if (preferPush) {
-            const local = loadData();
-            const merged = mergeRecords(local, remotePayload.records || []);
-            localStorage.setItem('yakult_records', JSON.stringify(merged));
+            // 本機記錄為準（刪除唔好被雲端加返）；仍合併 tombstone
+            if (remotePayload.deletedKeys && typeof remotePayload.deletedKeys === 'object') {
+              saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), remotePayload.deletedKeys));
+            }
           } else {
             applyRemotePayload(remotePayload);
           }
@@ -1944,9 +2027,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if ($(`priceDisplay-${p.id}`)) {
           $(`priceDisplay-${p.id}`).textContent = suggested !== null ? formatPriceLabel(p.id, suggested) : '—';
         }
-        calcSuggest(p.id);
       });
       checkStaleStockForStore(storeId, date);
+      checkDiscountSalesNotice(storeId, date);
+      PRODUCTS.forEach(p => { calcSuggest(p.id); });
     }
 
     function onStoreChange() {
@@ -2011,10 +2095,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           $(`price-${p.id}`).value = suggested !== null ? suggested : '';
           $(`priceDisplay-${p.id}`).textContent = suggested !== null ? formatPriceLabel(p.id, suggested) : '—';
         }
-
-        calcSuggest(p.id);
       });
       checkStaleStockForStore(storeId, date);
+      checkDiscountSalesNotice(storeId, date);
+      PRODUCTS.forEach(p => { calcSuggest(p.id); });
     }
 
     // 從一組按日期排序的記錄中，抽出「相近價錢」期間的銷量
@@ -2399,6 +2483,110 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return data[chain] || null;
     }
 
+    // ========== 全店折扣記錄（只參考，唔影響建議）==========
+    function loadStoreDiscountLogs() {
+      try {
+        const raw = localStorage.getItem('yakult_store_discount_logs');
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) { return []; }
+    }
+    function saveStoreDiscountLogs(arr) {
+      localStorage.setItem('yakult_store_discount_logs', JSON.stringify(arr));
+      localStorage.setItem('yakult_store_discount_logs_at', new Date().toISOString());
+    }
+    function renderStoreDiscountLogList() {
+      const el = $('storeDiscountLogList');
+      if (!el) return;
+      const logs = loadStoreDiscountLogs().slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      if (!logs.length) {
+        el.innerHTML = '<span style="color:#999;">尚無全店折扣記錄</span>';
+        return;
+      }
+      el.innerHTML = logs.map((x, idx) => {
+        const id = x.id || ('sdl-' + idx);
+        return '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">' +
+            '<div><b>' + (x.date || '') + '</b>　' + (x.chain || '') +
+            '<div style="font-size:0.8rem;margin-top:2px;">' + (x.label || '') +
+            (x.note ? '　<span style="color:#999;">' + x.note + '</span>' : '') + '</div></div>' +
+            '<button type="button" class="btn" style="width:auto;padding:4px 10px;font-size:0.75rem;background:#dc3545;color:#fff;flex-shrink:0;" ' +
+            'onclick="removeStoreDiscountLog(\'' + id + '\')">刪除</button>' +
+          '</div></div>';
+      }).join('');
+    }
+    function addStoreDiscountLog() {
+      const date = $('sdlDate') && $('sdlDate').value;
+      const chain = $('sdlChain') && $('sdlChain').value;
+      const label = $('sdlLabel') && $('sdlLabel').value.trim();
+      const note = $('sdlNote') && $('sdlNote').value.trim();
+      if (!date) { showToast('請選日期'); return; }
+      if (!label) { showToast('請填寫折扣內容（例如：全店88折）'); return; }
+      const logs = loadStoreDiscountLogs();
+      const id = 'sdl-' + Date.now();
+      logs.push({ id: id, date: date, chain: chain || '全部', label: label, note: note || '' });
+      saveStoreDiscountLogs(logs);
+      if ($('sdlDate')) $('sdlDate').value = '';
+      if ($('sdlLabel')) $('sdlLabel').value = '';
+      if ($('sdlNote')) $('sdlNote').value = '';
+      renderStoreDiscountLogList();
+      showToast('已新增全店折扣記錄');
+      if (typeof syncNow === 'function') { try { syncNow(false, false, true); } catch (e) {} }
+    }
+    function removeStoreDiscountLog(id) {
+      if (!confirm('確定刪除此折扣記錄？')) return;
+      const logs = loadStoreDiscountLogs().filter(x => x.id !== id);
+      saveStoreDiscountLogs(logs);
+      renderStoreDiscountLogList();
+      showToast('已刪除');
+      if (typeof syncNow === 'function') { try { syncNow(false, false, true); } catch (e) {} }
+    }
+
+    // 銷量反映喺「下次到店」：上次到店之後、今次到店當日（含）之間嘅全店折扣
+    function getDiscountLogsAffectingSales(storeId, fromDateExclusive, toDateInclusive) {
+      const chain = getStoreChain(storeId);
+      return loadStoreDiscountLogs().filter(x => {
+        if (!x.date) return false;
+        if (x.date <= fromDateExclusive) return false;
+        if (x.date > toDateInclusive) return false;
+        if (x.chain && x.chain !== '全部' && chain && x.chain !== chain) return false;
+        return true;
+      }).sort((a, b) => a.date.localeCompare(b.date));
+    }
+
+    // 今次銷量期間有無全店折扣（供銷量旁標記）
+    let _salesPeriodHasDiscount = false;
+    function checkDiscountSalesNotice(storeId, date) {
+      _salesPeriodHasDiscount = false;
+      if (!storeId || !date) return;
+      const last = getLastRecord(storeId, date);
+      const from = last ? last.date : '0000-01-01';
+      const hits = getDiscountLogsAffectingSales(storeId, from, date);
+      _salesPeriodHasDiscount = hits.length > 0;
+      // 更新各產品銷量旁標記
+      PRODUCTS.forEach(p => {
+        const soldEl = $('sold-' + p.id);
+        if (!soldEl) return;
+        updateSoldDiscountMark(soldEl);
+      });
+    }
+    function updateSoldDiscountMark(soldEl) {
+      if (!soldEl) return;
+      let mark = soldEl.querySelector('.disc-mark');
+      if (_salesPeriodHasDiscount) {
+        if (!mark) {
+          mark = document.createElement('span');
+          mark.className = 'disc-mark';
+          mark.title = '此段銷量包含全店折扣日';
+          mark.textContent = '🏷';
+          mark.style.cssText = 'margin-left:4px;font-size:0.9em;';
+          soldEl.appendChild(mark);
+        }
+      } else if (mark) {
+        mark.remove();
+      }
+    }
+
     function calcSuggest(prodId) {
       const lastText = $(`last-${prodId}`).textContent;
       const lastStock = lastText === '—' ? null : parseInt(lastText, 10);
@@ -2412,10 +2600,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
       if (lastStock !== null && !isNaN(curStock)) {
         const sold = lastStock - curStock;
-        soldEl.textContent = sold >= 0 ? sold : `${sold} (異常)`;
+        soldEl.textContent = sold >= 0 ? String(sold) : (sold + ' (異常)');
       } else {
         soldEl.textContent = '—';
       }
+      updateSoldDiscountMark(soldEl);
 
       const storeId = $('storeSelect').value;
       const date = $('recordDate').value || todayStr();
@@ -2506,6 +2695,16 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (dailyRate != null) dailyRate = dailyRate * freshFactor;
       }
 
+      // 上一段銷量若含全店折扣：唔代表下次同樣銷，預計下調
+      let discountSalesNote = '';
+      let discountSalesFactor = 1;
+      if (typeof _salesPeriodHasDiscount !== 'undefined' && _salesPeriodHasDiscount && expectedUntilNext != null) {
+        discountSalesFactor = 0.65; // 折扣段銷量偏高，下次按約 65% 估
+        expectedUntilNext = expectedUntilNext * discountSalesFactor;
+        if (dailyRate != null) dailyRate = dailyRate * discountSalesFactor;
+        discountSalesNote = '上一段銷量包含全店折扣，不宜直接作為下一段預期銷量；建議數量已按約 65% 保守估算。';
+      }
+
       // 最低安全庫存：一般 ≥20、十支裝 ≥10（不可再降低）
       // 僅在「須報交換」時不建議再落
       let adjMinBuf = minBuf;
@@ -2570,7 +2769,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         lastStock: lastStock,
         expNote: expNote || '',
         dayPatternNote: dayPatternNote || '',
-        dayProfile: dayProfile
+        dayProfile: dayProfile,
+        discountSalesNote: discountSalesNote || '',
+        discountSalesFactor: discountSalesFactor
       };
 
       // 建議欄只顯示條數；原因詳見 ?
@@ -2652,6 +2853,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       lines.push(histHtml);
       if (sug.dailyRate != null) {
         lines.push(`<div style="margin-top:4px;">換算日均約 <strong>${Math.round(sug.dailyRate * 10) / 10}</strong> → 到下次約賣 <strong>${Math.round(sug.expectedUntilNext || 0)}</strong></div>`);
+      }
+      if (sug.discountSalesNote) {
+        lines.push('<div style="margin-top:8px;padding:8px;background:#fff3e0;border-radius:8px;color:#e65100;">');
+        lines.push('<div style="font-weight:700;">🏷 折扣日銷量提醒</div>');
+        lines.push('<div style="font-size:0.9rem;margin-top:4px;">' + sug.discountSalesNote + '</div>');
+        lines.push('<div style="font-size:0.85rem;margin-top:4px;color:#666;">建議落貨並非單純以「上次存貨 − 今次存貨」補回。折扣期間推高的銷量，不代表下一段會維持相同水平，系統已改以較保守的預計銷量計算。</div>');
+        lines.push('</div>');
       }
       lines.push('</div>');
 
@@ -2894,6 +3102,8 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         records.push(record);
       }
 
+      // 重新儲存同一店同一日 → 取消刪除標記
+      if (typeof clearDeletedKey === 'function') clearDeletedKey(storeId, date);
       saveData(records);
       editingOriginal = null;
 
@@ -3012,11 +3222,16 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
     }
 
     function deleteRecord(storeId, date) {
-      if (!confirm(`確定刪除 ${date} 的記錄？`)) return;
+      if (!confirm('確定刪除 ' + date + ' 的記錄？')) return;
+      markRecordDeleted(storeId, date);
       let records = loadData().filter(r => !(r.storeId === storeId && r.date === date));
       saveData(records);
       renderHistory();
-      showToast('已刪除');
+      showToast('已刪除，正在同步雲端…');
+      // 優先上傳，避免 5 秒輪詢把舊記錄拉返嚟
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
+      }
     }
 
     // ========== 匯出 ==========
@@ -3737,6 +3952,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       if ($('expiryHint')) $('expiryHint').textContent = '';
       if ($('expiryDateLabel')) $('expiryDateLabel').textContent = '適用日期（新輸入）';
       if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
+      if (typeof renderStoreDiscountLogList === 'function') renderStoreDiscountLogList();
     }
     }
 
