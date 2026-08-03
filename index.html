@@ -534,22 +534,6 @@
         <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
         <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
       </div>
-      <div class="card" id="discountCard">
-        <div class="card-title">🏷 全店折扣日</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
-          全店大折／特別好賣的日子。到下次到店前若包含折扣日，建議落貨會按倍數上調（唔知邊隻特價都一律調整）。
-        </p>
-        <div id="discountList" style="font-size:0.78rem;margin-bottom:10px;"></div>
-        <div style="margin-bottom:10px;">
-          <label>新增折扣日</label>
-          <input type="date" id="discountDateInput">
-        </div>
-        <div style="margin-bottom:10px;">
-          <label>銷量倍數（預設 1.8）</label>
-          <input type="number" id="discountMultiplier" min="1" max="5" step="0.1" placeholder="1.8">
-        </div>
-        <button class="btn btn-primary" onclick="addDiscountDay()">加入折扣日</button>
-      </div>
       <div class="card">
         <div class="card-title">通知</div>
         <p style="font-size:0.85rem;color:var(--muted);margin-bottom:10px;">
@@ -1226,8 +1210,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         records: loadData(),
         schedule: (function(){ try { return JSON.parse(localStorage.getItem('yakult_scheduled_prices')||'{}'); } catch(e){ return {}; } })(),
         expiry: (function(){ try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date')||'{}'); } catch(e){ return {}; } })(),
-        discountDays: loadDiscountDays(),
-        discountMult: getDiscountMultiplier(),
         meta: {
           updatedBy: s.name || 'unknown',
           updatedAt: new Date().toISOString()
@@ -1256,15 +1238,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (!localAt || (remoteAt && remoteAt > localAt)) {
           localStorage.setItem('yakult_expiry_by_date', JSON.stringify(payload.expiry));
           if (remoteAt) localStorage.setItem('yakult_expiry_updated_at', remoteAt);
-        }
-      }
-      if (Array.isArray(payload.discountDays)) {
-        const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
-        const localAt = localStorage.getItem('yakult_discount_updated_at') || '';
-        if (!localAt || (remoteAt && remoteAt > localAt)) {
-          saveDiscountDays(payload.discountDays);
-          if (payload.discountMult) setDiscountMultiplier(payload.discountMult);
-          if (remoteAt) localStorage.setItem('yakult_discount_updated_at', remoteAt);
         }
       }
       return merged.length - before;
@@ -2414,101 +2387,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return data[chain] || null;
     }
 
-    // ========== 全店折扣日 ==========
-    function loadDiscountDays() {
-      try {
-        const raw = localStorage.getItem('yakult_discount_days');
-        const arr = raw ? JSON.parse(raw) : [];
-        return Array.isArray(arr) ? arr.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort() : [];
-      } catch (e) { return []; }
-    }
-    function saveDiscountDays(arr) {
-      localStorage.setItem('yakult_discount_days', JSON.stringify(arr));
-      localStorage.setItem('yakult_discount_updated_at', new Date().toISOString());
-    }
-    function getDiscountMultiplier() {
-      try {
-        const v = parseFloat(localStorage.getItem('yakult_discount_mult'));
-        if (!isNaN(v) && v >= 1 && v <= 5) return v;
-      } catch (e) {}
-      return 1.8;
-    }
-    function setDiscountMultiplier(v) {
-      const n = parseFloat(v);
-      if (!isNaN(n) && n >= 1 && n <= 5) {
-        localStorage.setItem('yakult_discount_mult', String(n));
-      }
-    }
-    function renderDiscountList() {
-      const el = $('discountList');
-      if (!el) return;
-      const days = loadDiscountDays();
-      const mult = getDiscountMultiplier();
-      if ($('discountMultiplier') && !$('discountMultiplier').value) {
-        $('discountMultiplier').value = mult;
-      }
-      if (!days.length) {
-        el.innerHTML = '<span style="color:#999;">尚未設定全店折扣日</span>';
-        return;
-      }
-      const today = todayStr();
-      el.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">已設定（倍數 ×' + mult + '）：</div>' +
-        days.map(d => {
-          const past = d < today;
-          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f0;">' +
-            '<span style="' + (past ? 'color:#999;' : '') + '"><b>' + d + '</b>' +
-            (past ? '（已過）' : (d === today ? '（今日）' : '')) + '</span>' +
-            '<button type="button" class="btn" style="width:auto;padding:4px 10px;font-size:0.75rem;background:#dc3545;color:#fff;" ' +
-            'onclick="removeDiscountDay(\'' + d + '\')">刪除</button></div>';
-        }).join('');
-    }
-    function addDiscountDay() {
-      const input = $('discountDateInput');
-      if (!input || !input.value) {
-        showToast('請選擇日期');
-        return;
-      }
-      const d = input.value;
-      if ($('discountMultiplier') && $('discountMultiplier').value) {
-        setDiscountMultiplier($('discountMultiplier').value);
-      }
-      let days = loadDiscountDays();
-      if (days.indexOf(d) >= 0) {
-        showToast('此日期已在列表');
-        return;
-      }
-      days.push(d);
-      days.sort();
-      saveDiscountDays(days);
-      input.value = '';
-      renderDiscountList();
-      showToast('已加入折扣日 ' + d);
-      if (typeof syncNow === 'function') {
-        try { syncNow(false, false, true); } catch (e) {}
-      }
-      // 重算建議
-      if (typeof PRODUCTS !== 'undefined') {
-        PRODUCTS.forEach(p => { try { calcSuggest(p.id); } catch (e) {} });
-      }
-    }
-    function removeDiscountDay(d) {
-      if (!confirm('刪除折扣日 ' + d + '？')) return;
-      let days = loadDiscountDays().filter(x => x !== d);
-      saveDiscountDays(days);
-      renderDiscountList();
-      showToast('已刪除');
-      if (typeof syncNow === 'function') {
-        try { syncNow(false, false, true); } catch (e) {}
-      }
-      if (typeof PRODUCTS !== 'undefined') {
-        PRODUCTS.forEach(p => { try { calcSuggest(p.id); } catch (e) {} });
-      }
-    }
-    // 由 from（不含）到 to（含）之間有冇折扣日
-    function discountDaysInRange(fromDateStr, toDateStr) {
-      return loadDiscountDays().filter(d => d > fromDateStr && d <= toDateStr);
-    }
-
     function calcSuggest(prodId) {
       const lastText = $(`last-${prodId}`).textContent;
       const lastStock = lastText === '—' ? null : parseInt(lastText, 10);
@@ -2616,21 +2494,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (dailyRate != null) dailyRate = dailyRate * freshFactor;
       }
 
-      // 全店折扣日：下次到店前若有折扣日，預計銷量 × 倍數（未知邊隻特價，全產品一併調整）
-      let discountNote = '';
-      let discountMult = 1;
-      const discInRange = discountDaysInRange(date, (function() {
-        const nd = new Date(date + 'T12:00:00');
-        nd.setDate(nd.getDate() + daysNext);
-        return formatLocalDate(nd);
-      })());
-      if (discInRange.length && expectedUntilNext != null && !mustExchange(remainToday)) {
-        discountMult = getDiscountMultiplier();
-        expectedUntilNext = expectedUntilNext * discountMult;
-        if (dailyRate != null) dailyRate = dailyRate * discountMult;
-        discountNote = '含全店折扣日 ' + discInRange.join('、') + '，預計 ×' + discountMult;
-      }
-
       // 最低安全庫存：一般 ≥20、十支裝 ≥10（不可再降低）
       // 僅在「須報交換」時不建議再落
       let adjMinBuf = minBuf;
@@ -2695,10 +2558,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         lastStock: lastStock,
         expNote: expNote || '',
         dayPatternNote: dayPatternNote || '',
-        dayProfile: dayProfile,
-        discountNote: discountNote || '',
-        discountMult: discountMult,
-        discountDays: discInRange || []
+        dayProfile: dayProfile
       };
 
       // 建議欄只顯示條數；原因詳見 ?
@@ -2800,18 +2660,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       lines.push('</div>');
 
-      lines.push('<div style="background:#fff8e1;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 全店折扣日</div>');
-      if (sug.discountNote) {
-        lines.push(`<div style="color:var(--primary);font-weight:600;">${sug.discountNote}</div>`);
-        lines.push('<div style="font-size:0.85rem;color:var(--muted);">因未確定邊隻產品特價，全部產品預計銷量同一倍數上調。</div>');
-      } else {
-        lines.push('<div style="color:var(--muted);">下次到店前無全店折扣日（可在設定新增）。</div>');
-      }
-      lines.push('</div>');
-
-      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑤ 到期日／新鮮度</div>');
+lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新鮮度</div>');
       if (sug.remainToday != null) {
         lines.push(`<div>今日出貨剩餘：<strong>${sug.remainToday}</strong> 日${sug.remainToday <= 7 ? '（須報交換）' : ''}</div>`);
         if (sug.remainNext != null) lines.push(`<div>下次到店時約剩餘：<strong>${sug.remainNext}</strong> 日</div>`);
@@ -2822,13 +2671,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       lines.push('</div>');
 
       lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑥ 公式</div>');
+      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑤ 公式</div>');
       lines.push(`<div>需要量 ≈ 預計到下次銷量 + 安全庫存 = <strong>${Math.round((sug.expectedUntilNext || 0) + (sug.minBuf || 0))}</strong></div>`);
       lines.push(`<div>建議排數 = 需要量 − 今次存貨 → 再四捨五入成整條（${unit} 排/條）</div>`);
       lines.push(`<div>結果：<strong>${sug.strips} 條</strong></div>`);
       lines.push('</div>');
 
-      lines.push('<div style="font-size:0.8rem;color:var(--muted);">此建議綜合：車期、同價銷量、平日／周末、全店折扣日倍數、安全庫存、到期日、轉價風險。最終請以現場情況為準。</div>');
+      lines.push('<div style="font-size:0.8rem;color:var(--muted);">此建議綜合：車期、同價銷量、平日／周末、安全庫存、到期日、轉價風險。最終請以現場情況為準。</div>');
 
       body.innerHTML = lines.join('');
     }
@@ -3876,7 +3725,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if ($('expiryHint')) $('expiryHint').textContent = '';
       if ($('expiryDateLabel')) $('expiryDateLabel').textContent = '適用日期（新輸入）';
       if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
-      if (typeof renderDiscountList === 'function') renderDiscountList();
     }
     }
 
