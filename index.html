@@ -474,9 +474,6 @@
       </div>
       <div class="card" id="expiryCard">
         <div class="card-title">📅 出貨到期日（每日每產品輸入一次）</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
-          選日期後填四個產品。已輸入過嘅日期唔可以再選；要改請按「編輯」。28日最新鮮；≤7日須報交換。
-        </p>
         <div id="expirySavedList" style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;line-height:1.6;"></div>
         <div style="margin-bottom:10px;">
           <label id="expiryDateLabel">適用日期（新輸入）</label>
@@ -731,12 +728,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const b = new Date(bStr + 'T12:00:00');
       return Math.round((b - a) / 86400000);
     }
-    // 顯示用：2026-08-27 → 8月27日
+    // 顯示用：2026-08-27 → 8月27日（月、日固定闊度方便對齊）
     function formatExpiryMD(dateStr) {
       if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr || '';
       const m = parseInt(dateStr.slice(5, 7), 10);
       const d = parseInt(dateStr.slice(8, 10), 10);
-      return m + '月' + d + '日';
+      // 用全形空格墊月，令「 8月」「 9月」「10月」月份位置對齊
+      const mStr = (m < 10 ? '\u3000' : '') + m;
+      const dStr = (d < 10 ? '\u3000' : '') + d;
+      return mStr + '月' + dStr + '日';
     }
     // 剩餘日數對銷量係數：28日=1，20日約0.85，14日約0.55，更低更差
     function freshnessSalesFactor(remainDays) {
@@ -792,8 +792,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const saved = getExpiryForDate(d);
         const lines = PRODUCTS.map(p => {
           if (!saved[p.id]) return null;
-          return '<div style="font-size:0.75rem;line-height:1.5;padding-left:2px;">' +
-            p.name.replace('益力多','') + '　' + formatExpiryMD(saved[p.id]) +
+          const label = p.id === 'lt' ? 'LT' : p.name.replace('益力多','').replace(/^\s+/, '');
+          return '<div style="display:grid;grid-template-columns:4.8em 7.5em;font-size:0.75rem;line-height:1.7;padding:1px 2px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;">' +
+            '<span>' + label + '</span>' +
+            '<span style="text-align:left;letter-spacing:0.02em;">' + formatExpiryMD(saved[p.id]) + '</span>' +
             '</div>';
         }).filter(Boolean).join('');
         return `<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">
@@ -1561,17 +1563,30 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function renderScheduleSummary() {
       const data = loadScheduleData();
-      const lines = Object.keys(data).map(chain => {
+      const chains = Object.keys(data);
+      if (!chains.length) {
+        $('scheduleSummary').innerHTML = '尚未設定任何預計轉價';
+        return;
+      }
+      const html = '<div style="font-weight:600;margin-bottom:6px;">已設定：</div>' + chains.map(chain => {
         const e = data[chain];
-        const priceStr = PRODUCTS.map(p => {
+        const priceLines = PRODUCTS.map(p => {
           const v = e.prices && e.prices[p.id];
-          return v != null ? `${p.name.replace('益力多','')}${formatPriceLabel(p.id, v)}` : null;
-        }).filter(Boolean).join('、');
-        return `<div><strong>${chain}</strong> ${e.effectiveDate} 起${priceStr ? '：' + priceStr : '（未設價錢）'}</div>`;
-      });
-      $('scheduleSummary').innerHTML = lines.length
-        ? '<div style="font-weight:600;margin-bottom:4px;">已設定：</div>' + lines.join('')
-        : '尚未設定任何預計轉價';
+          if (v == null || v === '') return null;
+          const label = p.id === 'lt' ? 'LT' : p.name.replace('益力多', '').replace(/^\s+/, '');
+          // $ 對齊：價錢用等寬數字
+          const priceText = formatPriceLabel(p.id, v);
+          return '<div style="display:grid;grid-template-columns:4.8em 1fr;font-size:0.78rem;line-height:1.7;padding:1px 2px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;">' +
+            '<span>' + label + '</span>' +
+            '<span style="text-align:left;">' + priceText + '</span>' +
+            '</div>';
+        }).filter(Boolean).join('');
+        return '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+          '<div style="margin-bottom:4px;"><strong>' + chain + '</strong>　' + (e.effectiveDate || '') + ' 起</div>' +
+          (priceLines || '<div style="font-size:0.75rem;color:#999;">（未設價錢）</div>') +
+          '</div>';
+      }).join('');
+      $('scheduleSummary').innerHTML = html;
     }
 
     // 暫存同步到的網購價錢，供套用
@@ -2788,10 +2803,29 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     // ========== 歷史 ==========
+    function formatRecordTime(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return hh + ':' + mm;
+      } catch (e) { return ''; }
+    }
+
     function renderHistory() {
       const storeFilter = $('historyStoreFilter').value;
       const dateFilter = $('historyDateFilter').value;
-      let records = loadData().sort((a, b) => b.date.localeCompare(a.date) || a.storeName.localeCompare(b.storeName));
+      // 先按日期（新→舊），同一日按儲存時間（新→舊）
+      let records = loadData().sort((a, b) => {
+        const dc = b.date.localeCompare(a.date);
+        if (dc !== 0) return dc;
+        const ta = a.updatedAt || '';
+        const tb = b.updatedAt || '';
+        if (ta || tb) return tb.localeCompare(ta);
+        return (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
+      });
 
       if (storeFilter) records = records.filter(r => r.storeId === storeFilter);
       if (dateFilter) records = records.filter(r => r.date === dateFilter);
@@ -2807,7 +2841,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           const pr = r.products[p.id] || {};
           if (pr.stock == null && pr.order == null && pr.price == null) return '';
           const stock = pr.stock != null ? Number(pr.stock) : null;
-          // 無落貨視為 0（不用 —）
           const order = pr.order != null ? Number(pr.order) : 0;
           const total = stock != null ? stock + order : (pr.order != null ? order : null);
           const parts = [];
