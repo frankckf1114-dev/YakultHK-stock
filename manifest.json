@@ -1,11 +1,11 @@
 {
   "name": "存貨管理",
   "short_name": "存貨管理",
-  "description": "Yakult 益力多每日存貨與落貨記錄",
+  "description": "Yakult 益力多每日存貨與落貨記錄（STH 屯門區）",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#FFFBF0",
-  "theme_color": "#E21530",
+  "background_color": "#F7F7F7",
+  "theme_color": "#E60012",
   "orientation": "portrait",
   "lang": "zh-HK",
   "icons": [
