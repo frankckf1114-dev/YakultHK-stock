@@ -788,18 +788,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       el.innerHTML = '<div style="margin-bottom:4px;">已輸入日期：</div>' + dates.map(d => {
         const saved = getExpiryForDate(d);
-        const brief = PRODUCTS.map(p => {
+        const lines = PRODUCTS.map(p => {
           if (!saved[p.id]) return null;
-          return p.name.replace('益力多','') + formatExpiryMD(saved[p.id]);
-        }).filter(Boolean).join('、');
-        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f0;">
-          <span style="flex:1;min-width:0;"><b>${d}</b> <span style="font-size:0.72rem;">${brief || ''}</span></span>
-          <span style="display:flex;gap:6px;flex-shrink:0;">
-            <button type="button" class="btn btn-secondary" style="width:auto;padding:4px 10px;font-size:0.75rem;"
-              onclick="startExpiryEdit('${d}')">編輯</button>
-            <button type="button" class="btn" style="width:auto;padding:4px 10px;font-size:0.75rem;background:#dc3545;color:#fff;"
-              onclick="clearExpiryDate('${d}')">清除</button>
-          </span>
+          return '<div style="font-size:0.75rem;line-height:1.5;padding-left:2px;">' +
+            p.name.replace('益力多','') + '　' + formatExpiryMD(saved[p.id]) +
+            '</div>';
+        }).filter(Boolean).join('');
+        return `<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+            <b>${d}</b>
+            <span style="display:flex;gap:6px;flex-shrink:0;">
+              <button type="button" class="btn btn-secondary" style="width:auto;padding:4px 10px;font-size:0.75rem;"
+                onclick="startExpiryEdit('${d}')">編輯</button>
+              <button type="button" class="btn" style="width:auto;padding:4px 10px;font-size:0.75rem;background:#dc3545;color:#fff;"
+                onclick="clearExpiryDate('${d}')">清除</button>
+            </span>
+          </div>
+          ${lines || '<div style="font-size:0.75rem;color:#999;">（無產品）</div>'}
         </div>`;
       }).join('');
     }
