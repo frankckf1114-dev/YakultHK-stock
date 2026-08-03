@@ -154,6 +154,35 @@
       margin-bottom: 10px;
       color: var(--primary-dark);
     }
+    /* 存貨輸入：大字；旁有 + 鍵配合數字鍵盤 */
+    input.stock-input {
+      font-size: 1.45rem !important;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      font-variant-numeric: tabular-nums;
+      padding: 12px 14px !important;
+      text-align: center;
+      flex: 1;
+      min-width: 0;
+    }
+    .stock-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .stock-plus-btn {
+      flex-shrink: 0;
+      width: 44px;
+      border: none;
+      border-radius: 10px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 1.25rem;
+      font-weight: 700;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .stock-plus-btn:active { opacity: 0.85; }
     .info-row {
       display: flex;
       justify-content: space-between;
@@ -1933,58 +1962,134 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       // 已移除店名搜尋
     }
 
+    // 存貨欄可輸入加總式（如 8+6+3），結算為整數
+    function evalSimpleSum(str) {
+      if (str == null) return null;
+      let s = String(str).trim().replace(/\s+/g, '');
+      if (!s) return null;
+      // 全形＋轉半形
+      s = s.replace(/＋/g, '+').replace(/－/g, '-');
+      if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s));
+      if (!/^[\d.+\-]+$/.test(s)) return null;
+      // 只接受加減串接，避免複雜運算
+      const parts = s.replace(/-/g, '+-').split('+').filter(p => p !== '');
+      let total = 0;
+      for (let i = 0; i < parts.length; i++) {
+        const n = parseFloat(parts[i]);
+        if (isNaN(n)) return null;
+        total += n;
+      }
+      return Math.round(total);
+    }
+    function resolveStockExpr(prodId) {
+      const el = $('stock-' + prodId);
+      if (!el) return;
+      const raw = el.value;
+      if (raw == null || String(raw).trim() === '') {
+        calcSuggest(prodId);
+        return;
+      }
+      const n = evalSimpleSum(raw);
+      if (n != null && n >= 0) {
+        el.value = String(n);
+      }
+      calcSuggest(prodId);
+    }
+    function onStockInput(prodId) {
+      // 輸入過程若已是純數字則即時更新建議；含 + 時等 blur/Enter 再結算
+      const el = $('stock-' + prodId);
+      if (!el) return;
+      const v = String(el.value || '');
+      if (v.indexOf('+') >= 0 || v.indexOf('＋') >= 0) return;
+      calcSuggest(prodId);
+    }
+    // 數字鍵盤無 +，用旁邊按鈕插入；不在此加總（只在 Enter／儲存時加總）
+    function insertStockPlus(prodId) {
+      const el = $('stock-' + prodId);
+      if (!el) return;
+      el.focus();
+      let v = String(el.value || '');
+      // 空或已以 + 結尾則不重複加
+      if (v === '' || /[+\uFF0B]$/.test(v)) return;
+      el.value = v + '+';
+      try {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      } catch (e) {}
+    }
+
     function renderProductForms() {
       const list = $('productsList');
-      list.innerHTML = PRODUCTS.map(p => `
-        <div class="product-card" id="prod-${p.id}">
-          <div class="product-name">${p.name}</div>
-          <div class="info-row">
-            <span class="label">上次存貨</span>
-            <span class="value" id="last-${p.id}">—</span>
-          </div>
-          <div class="info-row">
-            <span class="label">參考價錢</span>
-            <span class="value" id="priceDisplay-${p.id}">—</span>
-          </div>
-          <div style="margin-top:8px;">
-            <label>今次存貨</label>
-            <input type="number" id="stock-${p.id}" min="0" step="1" placeholder="0" oninput="calcSuggest('${p.id}')">
-          </div>
-          <div class="info-row" style="margin-top:8px;">
-            <span class="label">銷量（上次−今次）</span>
-            <span class="sold" id="sold-${p.id}">—</span>
-          </div>
-          <div class="info-row">
-            <span class="label">建議落貨
-              <button type="button" onclick="showSuggestDetail('${p.id}')" title="為何這樣建議"
-                style="margin-left:4px;border:1px solid var(--primary);color:var(--primary);background:#fff;border-radius:50%;width:22px;height:22px;font-size:0.75rem;font-weight:700;line-height:1;vertical-align:middle;padding:0;">?</button>
-            </span>
-            <span class="suggest" id="suggest-${p.id}">—</span>
-          </div>
-          <div style="margin-top:8px;">
-            <label>實際落貨數量</label>
-            <input type="number" id="order-${p.id}" min="0" step="1" placeholder="輸入落貨數" oninput="checkOrderAdvice('${p.id}')">
-          <div class="order-advice" id="orderAdvice-${p.id}" style="font-size:0.8rem;margin-top:4px;color:var(--muted);"></div>
-          </div>
-          <input type="hidden" id="price-${p.id}" value="">
-        </div>
-      `).join('');
+      // 流程：先全部點存貨，再決定落貨
+      const stockBlock = `
+        <div class="card" style="margin-bottom:12px;padding:12px;">
+          <div class="card-title" style="margin-bottom:8px;">① 點存貨</div>
+          <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">到店先記各產品現有存貨；按 Enter 跳至下一產品。</p>
+          ${PRODUCTS.map(p => `
+            <div class="product-card" id="prod-stock-${p.id}" style="margin-bottom:10px;">
+              <div class="product-name">${p.name}
+                <span style="font-weight:400;font-size:0.8rem;color:var(--muted);margin-left:6px;" id="priceDisplay-${p.id}">—</span>
+              </div>
+              <div class="info-row">
+                <span class="label">上次存貨</span>
+                <span class="value" id="last-${p.id}">—</span>
+              </div>
+              <div style="margin-top:6px;">
+                <label>今次存貨（排）</label>
+                <div class="stock-input-row">
+                  <input type="text" class="stock-input" id="stock-${p.id}" inputmode="numeric" enterkeyhint="next" autocomplete="off" placeholder="" oninput="onStockInput('${p.id}')">
+                  <button type="button" class="stock-plus-btn" tabindex="-1" onmousedown="event.preventDefault(); insertStockPlus('${p.id}')" title="插入加號">＋</button>
+                </div>
+              </div>
+              <div class="info-row" style="margin-top:6px;">
+                <span class="label">銷量</span>
+                <span class="sold" id="sold-${p.id}">—</span>
+              </div>
+              <input type="hidden" id="price-${p.id}" value="">
+            </div>
+          `).join('')}
+        </div>`;
+      const orderBlock = `
+        <div class="card" style="margin-bottom:12px;padding:12px;">
+          <div class="card-title" style="margin-bottom:8px;">② 決定落貨</div>
+          <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">存貨記完後，再按建議決定落貨；最後一欄按 Enter 可儲存。</p>
+          ${PRODUCTS.map(p => `
+            <div class="product-card" id="prod-order-${p.id}" style="margin-bottom:10px;">
+              <div class="product-name">${p.name}</div>
+              <div class="info-row">
+                <span class="label">建議落貨
+                  <button type="button" onclick="showSuggestDetail('${p.id}')" title="為何這樣建議"
+                    style="margin-left:4px;border:1px solid var(--primary);color:var(--primary);background:#fff;border-radius:50%;width:22px;height:22px;font-size:0.75rem;font-weight:700;line-height:1;vertical-align:middle;padding:0;">?</button>
+                </span>
+                <span class="suggest" id="suggest-${p.id}">—</span>
+              </div>
+              <div style="margin-top:6px;">
+                <label>實際落貨（排）</label>
+                <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="輸入落貨數" oninput="checkOrderAdvice('${p.id}')">
+                <div class="order-advice" id="orderAdvice-${p.id}" style="font-size:0.8rem;margin-top:4px;color:var(--muted);"></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+      list.innerHTML = stockBlock + orderBlock;
       setupEnterNavigation();
     }
 
-    // Enter：跳到下一輸入欄；最後一欄（青提味落貨數）→ 儲存
+    // Enter：先走完所有「今次存貨」，再走「落貨」；最後一欄 → 儲存
     function setupEnterNavigation() {
-      // 順序：各產品 今次存貨 → 實際落貨
       const fields = [];
-      PRODUCTS.forEach(p => {
-        fields.push($(`stock-${p.id}`));
-        fields.push($(`order-${p.id}`));
-      });
+      PRODUCTS.forEach(p => { fields.push($(`stock-${p.id}`)); });
+      PRODUCTS.forEach(p => { fields.push($(`order-${p.id}`)); });
       fields.forEach((el, i) => {
         if (!el) return;
         el.onkeydown = function (e) {
           if (e.key !== 'Enter') return;
           e.preventDefault();
+          // 存貨欄若含加號，先結算
+          if (el.id && el.id.indexOf('stock-') === 0) {
+            const pid = el.id.replace('stock-', '');
+            resolveStockExpr(pid);
+          }
           if (i < fields.length - 1) {
             const next = fields[i + 1];
             if (next) {
@@ -1992,7 +2097,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
               if (typeof next.select === 'function') next.select();
             }
           } else {
-            // 最後一欄：青提味落貨數 → 儲存
             el.blur();
             saveRecord();
           }
@@ -2099,6 +2203,14 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       checkStaleStockForStore(storeId, date);
       checkDiscountSalesNotice(storeId, date);
       PRODUCTS.forEach(p => { calcSuggest(p.id); });
+      // 選店後自動聚焦第一個「今次存貨」，方便立即點貨
+      setTimeout(function () {
+        const first = $('stock-' + PRODUCTS[0].id);
+        if (first && !editingOriginal) {
+          first.focus();
+          if (typeof first.select === 'function') first.select();
+        }
+      }, 50);
     }
 
     // 從一組按日期排序的記錄中，抽出「相近價錢」期間的銷量
@@ -2591,7 +2703,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const lastText = $(`last-${prodId}`).textContent;
       const lastStock = lastText === '—' ? null : parseInt(lastText, 10);
       const curStockRaw = $(`stock-${prodId}`).value;
-      const curStock = curStockRaw === '' ? NaN : parseInt(curStockRaw, 10);
+      const curStockParsed = curStockRaw === '' ? null : evalSimpleSum(curStockRaw);
+      const curStock = curStockParsed == null ? NaN : curStockParsed;
 
       const soldEl = $(`sold-${prodId}`);
       const suggestEl = $(`suggest-${prodId}`);
@@ -3051,6 +3164,9 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         return;
       }
 
+      // 儲存前先把存貨欄的加總式結算成數字
+      PRODUCTS.forEach(p => { resolveStockExpr(p.id); });
+
       const products = {};
       let hasData = false;
 
@@ -3504,44 +3620,33 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       const period = (dateFrom || '') + ' 至 ' + (dateTo || '');
       // 用 CSV + BOM 最穩（Excel / WPS 中文唔會亂碼）
       const sumHeaders = ['店舖', '集團', '到店次數'];
-      PRODUCTS.forEach(p => {
-        const n = productShortCode(p.id);
-        sumHeaders.push(n + '銷量', n + '落貨');
-      });
-      sumHeaders.push('總銷量', '前月比', '前年比', '總落貨', '最近到店');
+      PRODUCTS.forEach(p => { sumHeaders.push(productShortCode(p.id) + '銷量'); });
+      PRODUCTS.forEach(p => { sumHeaders.push(productShortCode(p.id) + '落貨'); });
+      sumHeaders.push('合計銷量', '合計落貨', '前月比', '前年比');
 
       const sumCsvRows = [sumHeaders];
       storeIds.forEach(sid => {
         const s = summary[sid];
-        let totalSales = 0, totalOrder = 0, lastDate = '';
-        const row = [s.storeName, s.chain, s.visits];
+        let totalSales = 0, totalOrder = 0;
+        const salesVals = [];
+        const orderVals = [];
         PRODUCTS.forEach(p => {
           const ag = s.products[p.id];
           const sales = ag ? Math.round(ag.sales) : 0;
           const order = ag ? Math.round(ag.order) : 0;
           totalSales += sales;
           totalOrder += order;
-          if (ag && ag.lastDate > lastDate) lastDate = ag.lastDate;
-          row.push(sales, order);
+          salesVals.push(sales);
+          orderVals.push(order);
         });
         const momSales = storeTotalSales(momReport.summary, sid);
         const yoySales = storeTotalSales(yoyReport.summary, sid);
-        row.push(totalSales, formatPctChange(totalSales, momSales), formatPctChange(totalSales, yoySales), totalOrder, lastDate);
+        const row = [s.storeName, s.chain, s.visits]
+          .concat(salesVals)
+          .concat(orderVals)
+          .concat([totalSales, totalOrder, formatPctChange(totalSales, momSales), formatPctChange(totalSales, yoySales)]);
         sumCsvRows.push(row);
       });
-
-      const detHeaders = ['日期', '店舖', '集團', '產品', '現存(支)', '銷量(支)', '落貨(支)', '售價', '落貨後總存(支)'];
-      const detCsvRows = [detHeaders];
-      details
-        .filter(d => {
-          if (!storeFilter) return true;
-          const st = STORES.find(s => s.id === storeFilter);
-          return st && d.storeName === st.name;
-        })
-        .sort((a, b) => b.date.localeCompare(a.date) || a.storeName.localeCompare(b.storeName, 'zh-HK'))
-        .forEach(d => {
-          detCsvRows.push([d.date, d.storeName, d.chain, d.product, d.stock, d.sales, d.order, d.price, d.total]);
-        });
 
       function toCsv(rows) {
         return rows.map(row => row.map(cell => {
@@ -3551,12 +3656,9 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         }).join(',')).join('\r\n');
       }
 
-      // 兩個工作內容合成一個 CSV：先摘要再明細（Excel 開完全無亂碼）
       const body =
         '【店舖銷售摘要】期間 ' + period + '\r\n' +
-        toCsv(sumCsvRows) +
-        '\r\n\r\n【每日明細】\r\n' +
-        toCsv(detCsvRows);
+        toCsv(sumCsvRows);
 
       const fname = '益力多銷售報告_' + (dateFrom || '') + '_' + (dateTo || todayStr()) + '.csv';
       downloadBlob(fname, 'text/csv;charset=utf-8;', body, true);
@@ -3604,28 +3706,37 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       const period = (dateFrom || '') + ' 至 ' + (dateTo || '');
       const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
 
-      // 摘要表（含前月比、前年比）
+      // 摘要表欄位：店舖／集團／到店 → 各產品銷量 → 各產品落貨 → 合計銷量／落貨 → 前月比／前年比
       let sumHead = '<tr><th>店舖</th><th>集團</th><th>到店</th>';
       PRODUCTS.forEach(p => {
-        const n = productShortCode(p.id);
-        sumHead += '<th>' + n + '銷量</th><th>' + n + '落貨</th>';
+        sumHead += '<th>' + productShortCode(p.id) + '銷量</th>';
       });
-      sumHead += '<th>總銷量</th><th>前月比</th><th>前年比</th><th>總落貨</th><th>最近到店</th></tr>';
+      PRODUCTS.forEach(p => {
+        sumHead += '<th>' + productShortCode(p.id) + '落貨</th>';
+      });
+      sumHead += '<th>合計銷量</th><th>合計落貨</th><th>前月比</th><th>前年比</th></tr>';
 
       let sumBody = '';
       let grandSales = 0, grandOrder = 0, grandMom = 0, grandYoy = 0;
+      const prodSalesTot = {};
+      const prodOrderTot = {};
+      PRODUCTS.forEach(p => { prodSalesTot[p.id] = 0; prodOrderTot[p.id] = 0; });
+
       storeIds.forEach(sid => {
         const s = summary[sid];
-        let totalSales = 0, totalOrder = 0, lastDate = '';
-        let cells = '';
+        let totalSales = 0, totalOrder = 0;
+        const salesCells = [];
+        const orderCells = [];
         PRODUCTS.forEach(p => {
           const ag = s.products[p.id];
           const sales = ag ? Math.round(ag.sales) : 0;
           const order = ag ? Math.round(ag.order) : 0;
           totalSales += sales;
           totalOrder += order;
-          if (ag && ag.lastDate > lastDate) lastDate = ag.lastDate;
-          cells += '<td class="num">' + sales + '</td><td class="num">' + order + '</td>';
+          prodSalesTot[p.id] += sales;
+          prodOrderTot[p.id] += order;
+          salesCells.push('<td class="num">' + sales + '</td>');
+          orderCells.push('<td class="num">' + order + '</td>');
         });
         const momSales = storeTotalSales(momReport.summary, sid);
         const yoySales = storeTotalSales(yoyReport.summary, sid);
@@ -3641,63 +3752,30 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         sumBody += '<td class="store">' + escapeXml(s.storeName) + '</td>';
         sumBody += '<td>' + escapeXml(s.chain) + '</td>';
         sumBody += '<td class="num">' + s.visits + '</td>';
-        sumBody += cells;
+        sumBody += salesCells.join('');
+        sumBody += orderCells.join('');
         sumBody += '<td class="num total">' + totalSales + '</td>';
+        sumBody += '<td class="num">' + totalOrder + '</td>';
         sumBody += '<td class="num ' + momCls + '">' + momPct + '</td>';
         sumBody += '<td class="num ' + yoyCls + '">' + yoyPct + '</td>';
-        sumBody += '<td class="num">' + totalOrder + '</td>';
-        sumBody += '<td>' + escapeXml(lastDate) + '</td>';
         sumBody += '</tr>';
       });
-      // 各產品合計銷量／落貨
-      const prodSalesTot = {};
-      const prodOrderTot = {};
-      PRODUCTS.forEach(p => { prodSalesTot[p.id] = 0; prodOrderTot[p.id] = 0; });
-      storeIds.forEach(sid => {
-        const s = summary[sid];
-        PRODUCTS.forEach(p => {
-          const ag = s.products[p.id];
-          if (!ag) return;
-          prodSalesTot[p.id] += Math.round(ag.sales || 0);
-          prodOrderTot[p.id] += Math.round(ag.order || 0);
-        });
-      });
+
       sumBody += '<tr class="grand"><td colspan="3"><b>合計</b></td>';
       PRODUCTS.forEach(p => {
         sumBody += '<td class="num"><b>' + prodSalesTot[p.id] + '</b></td>';
+      });
+      PRODUCTS.forEach(p => {
         sumBody += '<td class="num"><b>' + prodOrderTot[p.id] + '</b></td>';
       });
       sumBody += '<td class="num total"><b>' + grandSales + '</b></td>';
+      sumBody += '<td class="num"><b>' + grandOrder + '</b></td>';
       sumBody += '<td class="num ' + pctClass(grandSales, grandMom) + '"><b>' + formatPctChange(grandSales, grandMom) + '</b></td>';
       sumBody += '<td class="num ' + pctClass(grandSales, grandYoy) + '"><b>' + formatPctChange(grandSales, grandYoy) + '</b></td>';
-      sumBody += '<td class="num"><b>' + grandOrder + '</b></td><td></td></tr>';
+      sumBody += '</tr>';
 
       // 對比說明
       const cmpNote = '前月比：對比 ' + momFrom + '～' + momTo + '；前年比：對比 ' + yoyFrom + '～' + yoyTo + '。無對應數據顯示「-」。';
-
-      // 明細（最多顯示，PDF 用較精簡）
-      let detRows = '';
-      const filteredDet = details
-        .filter(d => {
-          if (!storeFilter) return true;
-          const st = STORES.find(s => s.id === storeFilter);
-          return st && d.storeName === st.name;
-        })
-        .sort((a, b) => b.date.localeCompare(a.date) || a.storeName.localeCompare(b.storeName, 'zh-HK'));
-
-      filteredDet.forEach(d => {
-        const salesCls = (d.sales !== '' && Number(d.sales) < 0) ? 'neg' : '';
-        detRows += '<tr>';
-        detRows += '<td>' + escapeXml(d.date) + '</td>';
-        detRows += '<td class="store">' + escapeXml(d.storeName) + '</td>';
-        detRows += '<td>' + escapeXml(d.product) + '</td>';
-        detRows += '<td class="num">' + d.stock + '</td>';
-        detRows += '<td class="num ' + salesCls + '">' + d.sales + '</td>';
-        detRows += '<td class="num">' + d.order + '</td>';
-        detRows += '<td class="num">' + (d.total != null && d.total !== '' ? d.total : '') + '</td>';
-        detRows += '<td>' + escapeXml(d.price) + '</td>';
-        detRows += '</tr>';
-      });
 
       const html = `<!DOCTYPE html>
 <html lang="zh-HK">
@@ -3744,21 +3822,13 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
     期間：${escapeXml(period)}　·　產生時間：${escapeXml(genTime)}　·　共 ${storeIds.length} 間店
   </div>
 
-  <h2>一、店舖銷售摘要</h2>
+  <h2>店舖銷售摘要</h2>
   <table>
     <thead>${sumHead}</thead>
     <tbody>${sumBody}</tbody>
   </table>
   <p class="note">單位：支。Y5=五支裝、Y10=十支裝、LT、MU=青提（Y5/LT/MU×5，Y10×10）。銷量＝上次總存−今次現存。</p>
   <p class="note">${escapeXml(cmpNote)}</p>
-
-  <h2>二、每日明細</h2>
-  <table>
-    <thead>
-      <tr><th>日期</th><th>店舖</th><th>產品</th><th>現存</th><th>銷量</th><th>落貨</th><th>總存</th><th>售價</th></tr>
-    </thead>
-    <tbody>${detRows}</tbody>
-  </table>
   <p class="note">本報告由「存貨管理」App 自動產生，僅供內部參考。</p>
 </body>
 </html>`;
