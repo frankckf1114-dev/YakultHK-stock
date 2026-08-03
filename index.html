@@ -483,10 +483,10 @@
       <div class="card">
         <div class="card-title">📅 預計轉價（按集團）</div>
         <p style="font-size:0.85rem; color:var(--muted); margin-bottom:12px;">
-          預先輸入下個星期五各集團的新價錢。到達該日期後，選擇該集團店舖時會自動帶出。
+          預先輸入各集團的新價錢及生效日。到達該日期後，選擇該集團店舖時會自動帶出。
         </p>
         <div style="margin-bottom:10px;">
-          <label>生效日期（星期五）</label>
+          <label>生效日期</label>
           <input type="date" id="scheduleEffectiveDate">
         </div>
         <div style="margin-bottom:10px;">
@@ -1213,9 +1213,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const before = local.length;
       localStorage.setItem('yakult_records', JSON.stringify(merged));
       if (payload.schedule && typeof payload.schedule === 'object') {
-        let sch = {};
-        try { sch = JSON.parse(localStorage.getItem('yakult_scheduled_prices')||'{}'); } catch(e){}
-        localStorage.setItem('yakult_scheduled_prices', JSON.stringify(Object.assign({}, sch, payload.schedule)));
+        const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
+        const localAt = localStorage.getItem('yakult_schedule_updated_at') || '';
+        // 本機較新（剛改轉價日）唔俾雲端舊資料蓋過
+        if (!localAt || (remoteAt && remoteAt > localAt)) {
+          localStorage.setItem('yakult_scheduled_prices', JSON.stringify(payload.schedule));
+          if (remoteAt) localStorage.setItem('yakult_schedule_updated_at', remoteAt);
+        }
       }
       if (payload.expiry && typeof payload.expiry === 'object') {
         const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
@@ -1413,6 +1417,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function saveScheduleData(data) {
       localStorage.setItem('yakult_scheduled_prices', JSON.stringify(data));
+      localStorage.setItem('yakult_schedule_updated_at', new Date().toISOString());
     }
 
     // 取得某產品的建議價錢：
@@ -1511,11 +1516,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         showToast('請選擇生效日期');
         return;
       }
-      // 提醒最好是星期五
-      if (getDayOfWeek(effectiveDate) !== 5) {
-        if (!confirm('選擇的日期不是星期五，確定仍要儲存？')) return;
-      }
-
       const prices = {};
       PRODUCTS.forEach(p => {
         const v = $(`sched-price-${p.id}`).value;
@@ -1549,6 +1549,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         renderHistory();
       }
       showToast(`${chain} 已儲存；已更新 ${updatedCount} 筆歷史價錢（${effectiveDate} 起）`);
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
+      }
     }
 
     // 將預計轉價寫入符合條件的歷史記錄
@@ -2862,15 +2865,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         }
       }
 
-      // 接近星期五轉價：檢查是否會堆積
+      // 接近已設定嘅轉價生效日：檢查是否會堆積（唔再假設星期五）
       const storeId = $('storeSelect').value;
       const date = $('recordDate').value || todayStr();
       const schedule = getScheduleEffectiveForStore(storeId);
-      const daysFri = daysUntilNextFriday(date);
       let priceChangeSoon = false;
       let changeDate = null;
       if (schedule && schedule.effectiveDate) {
-        // 生效日在記錄日之後、且在下次到店之前或當日
         if (schedule.effectiveDate > date) {
           const dEff = new Date(schedule.effectiveDate + 'T12:00:00');
           const dRec = new Date(date + 'T12:00:00');
@@ -2881,27 +2882,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           }
         }
       }
-      // 即使未設預計轉價，若下次到店跨過星期五，亦提示留意轉價週
-      const crossesFriday = daysFri < sug.daysNext;
 
-      if (priceChangeSoon || crossesFriday) {
-        const daysToChange = priceChangeSoon
-          ? Math.round((new Date(changeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000)
-          : daysFri;
+      if (priceChangeSoon && changeDate) {
+        const daysToChange = Math.round((new Date(changeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
         const daily = sug.dailyRate != null ? sug.dailyRate : null;
         const totalAfterOrder = sug.curStock + order;
         if (daily != null && daily > 0) {
           const sellBefore = daily * daysToChange;
           const remainAtChange = totalAfterOrder - sellBefore;
           if (remainAtChange > sug.minBuf * 2 && order > sug.packs) {
-            msgs.push(`臨近轉價（${priceChangeSoon ? changeDate : '本週五'}），落多恐轉價後堆積`);
+            msgs.push('臨近轉價（' + changeDate + '），落多恐轉價後堆積');
             if (color === 'var(--success)' || color === 'var(--muted)') color = '#e65100';
           } else if (remainAtChange > sug.minBuf * 3) {
-            msgs.push(`距轉價約${daysToChange}天，現有+落貨偏高，注意堆積`);
+            msgs.push('距轉價約' + daysToChange + '天，現有+落貨偏高，注意堆積');
             if (color !== '#c62828') color = '#e65100';
           }
-        } else if (order > sug.packs && (priceChangeSoon || crossesFriday)) {
-          msgs.push(`臨近轉價日，不宜落太多`);
+        } else if (order > sug.packs) {
+          msgs.push('臨近轉價日（' + changeDate + '），不宜落太多');
           if (color === 'var(--success)') color = '#e65100';
         }
       }
