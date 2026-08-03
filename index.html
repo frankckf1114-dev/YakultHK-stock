@@ -271,6 +271,35 @@
       font-size: 0.85rem;
       color: var(--muted);
     }
+    .hist-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .hist-table th, .hist-table td {
+      padding: 4px 3px;
+      text-align: center;
+      border-bottom: 1px solid #f0f0f0;
+      white-space: nowrap;
+    }
+    .hist-table th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.72rem;
+    }
+    .hist-table td.row-label {
+      text-align: left;
+      font-weight: 600;
+      color: #444;
+      padding-left: 0;
+    }
+    .hist-table tr.total-row td {
+      font-weight: 700;
+      color: var(--primary);
+      border-bottom: none;
+    }
     .empty {
       text-align: center;
       padding: 40px 20px;
@@ -3060,19 +3089,35 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
 
       list.innerHTML = records.map(r => {
-        const items = PRODUCTS.map(p => {
+        const short = { '5pack': 'Y5', '10pack': 'Y10', 'lt': 'LT', 'grape': 'MU' };
+        let hasAny = false;
+        const stocks = [], orders = [], totals = [], prices = [];
+        PRODUCTS.forEach(p => {
           const pr = r.products[p.id] || {};
-          if (pr.stock == null && pr.order == null && pr.price == null) return '';
-          const stock = pr.stock != null ? Number(pr.stock) : null;
-          const order = pr.order != null ? Number(pr.order) : 0;
-          const total = stock != null ? stock + order : (pr.order != null ? order : null);
-          const parts = [];
-          parts.push('存' + (stock != null ? stock : '—'));
-          parts.push('落' + order);
-          parts.push('總' + (total != null ? total : '—'));
-          parts.push(pr.price != null ? formatPriceLabel(p.id, pr.price) : '價—');
-          return '<div><strong>' + p.name.replace('益力多','') + '</strong>：' + parts.join(' / ') + '</div>';
-        }).filter(Boolean).join('');
+          const stock = pr.stock != null && pr.stock !== '' ? Number(pr.stock) : null;
+          const order = pr.order != null && pr.order !== '' ? Number(pr.order) : null;
+          const total = (stock != null || order != null)
+            ? (stock != null ? stock : 0) + (order != null ? order : 0)
+            : null;
+          if (stock != null || order != null || pr.price != null) hasAny = true;
+          stocks.push(stock != null ? stock : '—');
+          orders.push(order != null ? order : '—');
+          totals.push(total != null ? total : '—');
+          prices.push(pr.price != null ? formatPriceLabel(p.id, pr.price) : '—');
+        });
+        let table = '';
+        if (hasAny) {
+          table = '<table class="hist-table"><thead><tr><th></th>' +
+            PRODUCTS.map(p => '<th>' + (short[p.id] || p.id) + '</th>').join('') +
+            '</tr></thead><tbody>' +
+            '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '<tr><td class="row-label">落貨</td>' + orders.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '<tr class="total-row"><td class="row-label">合共</td>' + totals.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '<tr><td class="row-label">價錢</td>' + prices.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '</tbody></table>';
+        } else {
+          table = '（無詳細資料）';
+        }
 
         return (
           '<div class="history-item">' +
@@ -3080,7 +3125,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
               '<span>' + r.storeName + '</span>' +
               '<span class="history-date">' + r.date + '</span>' +
             '</div>' +
-            '<div class="history-detail">' + (items || '（無詳細資料）') + '</div>' +
+            '<div class="history-detail">' + table + '</div>' +
             '<div style="margin-top:8px;">' +
               '<button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="loadRecordToForm(\'' + r.storeId + '\',\'' + r.date + '\')">載入修改</button>' +
               '<button class="btn" style="padding:6px 12px; font-size:0.85rem; width:auto; background:#dc3545; color:white; margin-left:6px;" onclick="deleteRecord(\'' + r.storeId + '\',\'' + r.date + '\')">刪除</button>' +
