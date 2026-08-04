@@ -1966,11 +1966,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       setupBackGuard();
     }
 
-    // 有未儲存輸入時，按返回先確認，避免誤觸退出
-    let _backGuardArmed = false;
+    // 攔截系統返回：有未儲存資料時先確認（Android / 瀏覽器返回鍵）
+    let _backAllowExit = false;
+    let _backTrapOn = false;
     function hasUnsavedInput() {
-      const storeId = $('storeSelect') && $('storeSelect').value;
-      if (!storeId) return false;
+      if (editingOriginal) return true;
       for (let i = 0; i < PRODUCTS.length; i++) {
         const p = PRODUCTS[i];
         const s = $('stock-' + p.id);
@@ -1978,49 +1978,59 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (s && String(s.value || '').trim() !== '') return true;
         if (o && String(o.value || '').trim() !== '') return true;
       }
-      return !!editingOriginal;
+      const storeId = $('storeSelect') && $('storeSelect').value;
+      // 已選店但尚未填數：也視為可能中途離開，不強制攔截
+      return false;
     }
-    function armBackGuard() {
-      if (_backGuardArmed) return;
+    function pushBackTrap() {
       try {
-        history.pushState({ yakultGuard: 1 }, '');
-        _backGuardArmed = true;
+        history.pushState({ yakultTrap: Date.now() }, document.title, location.href);
+        _backTrapOn = true;
       } catch (e) {}
     }
     function setupBackGuard() {
-      // 首次進入也壓一層 state，方便攔截第一次返回
-      try { history.replaceState({ yakultRoot: 1 }, ''); } catch (e) {}
-      window.addEventListener('popstate', function (e) {
-        if (hasUnsavedInput()) {
-          const ok = confirm('尚有未儲存的存貨／落貨資料，確定要離開？');
-          if (!ok) {
-            // 取消離開：再推回一層，留在本頁
-            try { history.pushState({ yakultGuard: 1 }, ''); } catch (err) {}
-            _backGuardArmed = true;
-            return;
-          }
-          // 確定離開：再返回一次，以便退出 App／上一頁
-          _backGuardArmed = false;
-          setTimeout(function () {
-            try { history.back(); } catch (err) {}
-          }, 50);
+      // 進 App 立刻多一層歷史，讓第一次「返回」先觸發 popstate
+      try {
+        history.replaceState({ yakultRoot: 1 }, document.title, location.href);
+      } catch (e) {}
+      pushBackTrap();
+
+      window.addEventListener('popstate', function () {
+        if (_backAllowExit) {
+          _backAllowExit = false;
           return;
         }
-        _backGuardArmed = false;
-      });
-      // 使用者開始輸入時武裝
-      document.addEventListener('input', function (e) {
-        if (!e.target) return;
-        const id = e.target.id || '';
-        if (id.indexOf('stock-') === 0 || id.indexOf('order-') === 0 || id === 'storeSelect') {
-          if (hasUnsavedInput()) armBackGuard();
+        if (hasUnsavedInput()) {
+          // 先補回一層，避免對話框期間再被系統退出
+          pushBackTrap();
+          const ok = confirm('尚有未儲存的存貨／落貨資料，確定要離開？');
+          if (ok) {
+            _backAllowExit = true;
+            _backTrapOn = false;
+            setTimeout(function () {
+              try { history.go(-2); } catch (err) {
+                try { history.back(); } catch (e2) {}
+              }
+            }, 10);
+          }
+          // 取消：已 pushBackTrap，資料保留
+        } else {
+          // 無未儲存內容：允許離開
+          _backAllowExit = true;
+          _backTrapOn = false;
+          setTimeout(function () {
+            try { history.back(); } catch (err) {}
+          }, 10);
         }
-      }, true);
-      document.addEventListener('change', function (e) {
-        if (!e.target) return;
-        if (e.target.id === 'storeSelect' && hasUnsavedInput()) armBackGuard();
-      }, true);
-      // 關閉分頁／重新整理時提示（桌面較有效；部分手機瀏覽器支援）
+      });
+
+      // 每次從背景回到前景再確保有 trap
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+          if (!_backTrapOn) pushBackTrap();
+        }
+      });
+
       window.addEventListener('beforeunload', function (e) {
         if (!hasUnsavedInput()) return;
         e.preventDefault();
