@@ -3235,12 +3235,15 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         }
       }
 
-      // 接近已設定嘅轉價生效日：檢查是否會堆積（唔再假設星期五）
+      // 接近已設定的轉價生效日
+      // 若新價較便宜（特價）→ 落多屬合理，不警告堆積
+      // 若新價較貴或不明 → 才提醒避免轉價後堆積
       const storeId = $('storeSelect').value;
       const date = $('recordDate').value || todayStr();
       const schedule = getScheduleEffectiveForStore(storeId);
       let priceChangeSoon = false;
       let changeDate = null;
+      let newPriceCheaper = false;
       if (schedule && schedule.effectiveDate) {
         if (schedule.effectiveDate > date) {
           const dEff = new Date(schedule.effectiveDate + 'T12:00:00');
@@ -3249,27 +3252,42 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           if (daysToEff > 0 && daysToEff <= sug.daysNext + 1) {
             priceChangeSoon = true;
             changeDate = schedule.effectiveDate;
+            const schedPrice = schedule.prices && schedule.prices[prodId] != null
+              ? parseFloat(schedule.prices[prodId]) : NaN;
+            const curPrice = parseFloat(($('price-' + prodId) && $('price-' + prodId).value) || '');
+            if (!isNaN(schedPrice) && !isNaN(curPrice) && schedPrice < curPrice - 0.01) {
+              newPriceCheaper = true;
+            }
           }
         }
       }
 
       if (priceChangeSoon && changeDate) {
-        const daysToChange = Math.round((new Date(changeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
-        const daily = sug.dailyRate != null ? sug.dailyRate : null;
-        const totalAfterOrder = sug.curStock + order;
-        if (daily != null && daily > 0) {
-          const sellBefore = daily * daysToChange;
-          const remainAtChange = totalAfterOrder - sellBefore;
-          if (remainAtChange > sug.minBuf * 2 && order > sug.packs) {
-            msgs.push('臨近轉價（' + changeDate + '），落多恐轉價後堆積');
-            if (color === 'var(--success)' || color === 'var(--muted)') color = '#e65100';
-          } else if (remainAtChange > sug.minBuf * 3) {
-            msgs.push('距轉價約' + daysToChange + '天，現有+落貨偏高，注意堆積');
-            if (color !== '#c62828') color = '#e65100';
+        if (newPriceCheaper) {
+          // 轉為更便宜：落多合理，可正面提示
+          if (order > sug.packs) {
+            msgs.push('即將特價（' + changeDate + '），適量多落合理');
+            if (color === '#c62828' || color === '#e65100') color = 'var(--success)';
+            else if (color === 'var(--muted)') color = 'var(--success)';
           }
-        } else if (order > sug.packs) {
-          msgs.push('臨近轉價日（' + changeDate + '），不宜落太多');
-          if (color === 'var(--success)') color = '#e65100';
+        } else {
+          const daysToChange = Math.round((new Date(changeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
+          const daily = sug.dailyRate != null ? sug.dailyRate : null;
+          const totalAfterOrder = sug.curStock + order;
+          if (daily != null && daily > 0) {
+            const sellBefore = daily * daysToChange;
+            const remainAtChange = totalAfterOrder - sellBefore;
+            if (remainAtChange > sug.minBuf * 2 && order > sug.packs) {
+              msgs.push('臨近轉價（' + changeDate + '），落多恐轉價後堆積');
+              if (color === 'var(--success)' || color === 'var(--muted)') color = '#e65100';
+            } else if (remainAtChange > sug.minBuf * 3) {
+              msgs.push('距轉價約' + daysToChange + '天，現有+落貨偏高，注意堆積');
+              if (color !== '#c62828') color = '#e65100';
+            }
+          } else if (order > sug.packs) {
+            msgs.push('臨近轉價日（' + changeDate + '），不宜落太多');
+            if (color === 'var(--success)') color = '#e65100';
+          }
         }
       }
 
