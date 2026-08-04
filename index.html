@@ -154,35 +154,13 @@
       margin-bottom: 10px;
       color: var(--primary-dark);
     }
-    /* 存貨輸入：大字；旁有 + 鍵配合數字鍵盤 */
     input.stock-input {
-      font-size: 1.45rem !important;
+      font-size: 1.35rem !important;
       font-weight: 700;
-      letter-spacing: 0.02em;
       font-variant-numeric: tabular-nums;
       padding: 12px 14px !important;
       text-align: center;
-      flex: 1;
-      min-width: 0;
     }
-    .stock-input-row {
-      display: flex;
-      gap: 8px;
-      align-items: stretch;
-    }
-    .stock-plus-btn {
-      flex-shrink: 0;
-      width: 44px;
-      border: none;
-      border-radius: 10px;
-      background: var(--primary);
-      color: #fff;
-      font-size: 1.25rem;
-      font-weight: 700;
-      cursor: pointer;
-      line-height: 1;
-    }
-    .stock-plus-btn:active { opacity: 0.85; }
     .info-row {
       display: flex;
       justify-content: space-between;
@@ -2121,62 +2099,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       // 已移除店名搜尋
     }
 
-    // 存貨欄可輸入加總式（如 8+6+3），結算為整數
-    function evalSimpleSum(str) {
-      if (str == null) return null;
-      let s = String(str).trim().replace(/\s+/g, '');
-      if (!s) return null;
-      // 全形＋轉半形
-      s = s.replace(/＋/g, '+').replace(/－/g, '-');
-      if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s));
-      if (!/^[\d.+\-]+$/.test(s)) return null;
-      // 只接受加減串接，避免複雜運算
-      const parts = s.replace(/-/g, '+-').split('+').filter(p => p !== '');
-      let total = 0;
-      for (let i = 0; i < parts.length; i++) {
-        const n = parseFloat(parts[i]);
-        if (isNaN(n)) return null;
-        total += n;
-      }
-      return Math.round(total);
-    }
-    function resolveStockExpr(prodId) {
-      const el = $('stock-' + prodId);
-      if (!el) return;
-      const raw = el.value;
-      if (raw == null || String(raw).trim() === '') {
-        calcSuggest(prodId);
-        return;
-      }
-      const n = evalSimpleSum(raw);
-      if (n != null && n >= 0) {
-        el.value = String(n);
-      }
-      calcSuggest(prodId);
-    }
-    function onStockInput(prodId) {
-      // 輸入過程若已是純數字則即時更新建議；含 + 時等 blur/Enter 再結算
-      const el = $('stock-' + prodId);
-      if (!el) return;
-      const v = String(el.value || '');
-      if (v.indexOf('+') >= 0 || v.indexOf('＋') >= 0) return;
-      calcSuggest(prodId);
-    }
-    // 數字鍵盤無 +，用旁邊按鈕插入；不在此加總（只在 Enter／儲存時加總）
-    function insertStockPlus(prodId) {
-      const el = $('stock-' + prodId);
-      if (!el) return;
-      el.focus();
-      let v = String(el.value || '');
-      // 空或已以 + 結尾則不重複加
-      if (v === '' || /[+\uFF0B]$/.test(v)) return;
-      el.value = v + '+';
-      try {
-        const len = el.value.length;
-        el.setSelectionRange(len, len);
-      } catch (e) {}
-    }
-
     function renderProductForms() {
       const list = $('productsList');
       // 流程：先全部點存貨，再決定落貨
@@ -2195,10 +2117,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
               </div>
               <div style="margin-top:6px;">
                 <label>今次存貨（排）</label>
-                <div class="stock-input-row">
-                  <input type="text" class="stock-input" id="stock-${p.id}" inputmode="numeric" enterkeyhint="next" autocomplete="off" placeholder="" oninput="onStockInput('${p.id}')">
-                  <button type="button" class="stock-plus-btn" tabindex="-1" onmousedown="event.preventDefault(); insertStockPlus('${p.id}')" title="插入加號">＋</button>
-                </div>
+                <input type="number" class="stock-input" id="stock-${p.id}" min="0" step="1" inputmode="numeric" enterkeyhint="next" placeholder="" oninput="calcSuggest('${p.id}')">
               </div>
               <div class="info-row" style="margin-top:6px;">
                 <span class="label">銷量</span>
@@ -2244,11 +2163,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         el.onkeydown = function (e) {
           if (e.key !== 'Enter') return;
           e.preventDefault();
-          // 存貨欄若含加號，先結算
-          if (el.id && el.id.indexOf('stock-') === 0) {
-            const pid = el.id.replace('stock-', '');
-            resolveStockExpr(pid);
-          }
           if (i < fields.length - 1) {
             const next = fields[i + 1];
             if (next) {
@@ -2862,8 +2776,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const lastText = $(`last-${prodId}`).textContent;
       const lastStock = lastText === '—' ? null : parseInt(lastText, 10);
       const curStockRaw = $(`stock-${prodId}`).value;
-      const curStockParsed = curStockRaw === '' ? null : evalSimpleSum(curStockRaw);
-      const curStock = curStockParsed == null ? NaN : curStockParsed;
+      const curStock = curStockRaw === '' ? NaN : parseInt(curStockRaw, 10);
 
       const soldEl = $(`sold-${prodId}`);
       const suggestEl = $(`suggest-${prodId}`);
@@ -3195,103 +3108,10 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         return;
       }
 
-      const unit = getStripSize(prodId);
-      const orderStrips = order / unit; // 可能非整數，顯示時用約
-      const diffPacks = order - sug.packs;
-      const diffStrips = diffPacks / unit;
-      const absDiffStrips = Math.abs(diffStrips);
-
       const msgs = [];
       let color = 'var(--muted)';
 
-      // 與建議差距
-      if (sug.packs === 0 && order === 0) {
-        msgs.push('與建議一致');
-        color = 'var(--success)';
-      } else if (Math.abs(diffPacks) < unit * 0.5) {
-        msgs.push('與建議接近');
-        color = 'var(--success)';
-      } else if (diffPacks > 0) {
-        if (absDiffStrips >= 3) {
-          msgs.push(`偏多約${Math.round(diffStrips)}條，可能過多`);
-          color = '#c62828';
-        } else if (absDiffStrips >= 1.5) {
-          msgs.push(`略多約${Math.round(diffStrips * 10) / 10}條`);
-          color = '#e65100';
-        } else {
-          msgs.push('稍高於建議');
-          color = '#ef6c00';
-        }
-      } else {
-        if (absDiffStrips >= 3) {
-          msgs.push(`偏少約${Math.round(absDiffStrips)}條，下次可能斷貨`);
-          color = '#c62828';
-        } else if (absDiffStrips >= 1.5) {
-          msgs.push(`略少約${Math.round(absDiffStrips * 10) / 10}條`);
-          color = '#e65100';
-        } else {
-          msgs.push('稍低於建議');
-          color = '#ef6c00';
-        }
-      }
-
-      // 接近已設定的轉價生效日
-      // 若新價較便宜（特價）→ 落多屬合理，不警告堆積
-      // 若新價較貴或不明 → 才提醒避免轉價後堆積
-      const storeId = $('storeSelect').value;
-      const date = $('recordDate').value || todayStr();
-      const schedule = getScheduleEffectiveForStore(storeId);
-      let priceChangeSoon = false;
-      let changeDate = null;
-      let newPriceCheaper = false;
-      if (schedule && schedule.effectiveDate) {
-        if (schedule.effectiveDate > date) {
-          const dEff = new Date(schedule.effectiveDate + 'T12:00:00');
-          const dRec = new Date(date + 'T12:00:00');
-          const daysToEff = Math.round((dEff - dRec) / 86400000);
-          if (daysToEff > 0 && daysToEff <= sug.daysNext + 1) {
-            priceChangeSoon = true;
-            changeDate = schedule.effectiveDate;
-            const schedPrice = schedule.prices && schedule.prices[prodId] != null
-              ? parseFloat(schedule.prices[prodId]) : NaN;
-            const curPrice = parseFloat(($('price-' + prodId) && $('price-' + prodId).value) || '');
-            if (!isNaN(schedPrice) && !isNaN(curPrice) && schedPrice < curPrice - 0.01) {
-              newPriceCheaper = true;
-            }
-          }
-        }
-      }
-
-      if (priceChangeSoon && changeDate) {
-        if (newPriceCheaper) {
-          // 轉為更便宜：落多合理，可正面提示
-          if (order > sug.packs) {
-            msgs.push('即將特價（' + changeDate + '），適量多落合理');
-            if (color === '#c62828' || color === '#e65100') color = 'var(--success)';
-            else if (color === 'var(--muted)') color = 'var(--success)';
-          }
-        } else {
-          const daysToChange = Math.round((new Date(changeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
-          const daily = sug.dailyRate != null ? sug.dailyRate : null;
-          const totalAfterOrder = sug.curStock + order;
-          if (daily != null && daily > 0) {
-            const sellBefore = daily * daysToChange;
-            const remainAtChange = totalAfterOrder - sellBefore;
-            if (remainAtChange > sug.minBuf * 2 && order > sug.packs) {
-              msgs.push('臨近轉價（' + changeDate + '），落多恐轉價後堆積');
-              if (color === 'var(--success)' || color === 'var(--muted)') color = '#e65100';
-            } else if (remainAtChange > sug.minBuf * 3) {
-              msgs.push('距轉價約' + daysToChange + '天，現有+落貨偏高，注意堆積');
-              if (color !== '#c62828') color = '#e65100';
-            }
-          } else if (order > sug.packs) {
-            msgs.push('臨近轉價日（' + changeDate + '），不宜落太多');
-            if (color === 'var(--success)') color = '#e65100';
-          }
-        }
-      }
-
-      // 到期日／報交換
+      // 不再提示「落貨與建議不同」；僅保留到期／報交換等重要提醒
       if (sug.remainToday != null) {
         if (sug.remainToday <= 7) {
           msgs.push(`剩餘${sug.remainToday}日須報交換，不應再落貨`);
@@ -3299,12 +3119,6 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         } else if (sug.remainNext != null && sug.remainNext <= 7 && order > 0) {
           msgs.push(`下次到店剩約${sug.remainNext}日須報交換，落多必報銷`);
           color = '#c62828';
-        } else if (sug.remainNext != null && sug.remainNext < 14 && order > sug.packs) {
-          msgs.push(`到期短（下次剩約${sug.remainNext}日），落多易報銷`);
-          if (color !== '#c62828') color = '#c62828';
-        } else if (sug.remainToday < 20 && order > sug.packs + getStripSize(prodId)) {
-          msgs.push(`出貨偏舊（剩${sug.remainToday}日），不宜多落`);
-          if (color === 'var(--success)' || color === 'var(--muted)') color = '#e65100';
         }
       }
 
@@ -3341,9 +3155,6 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         showToast('請選擇日期');
         return;
       }
-
-      // 儲存前先把存貨欄的加總式結算成數字
-      PRODUCTS.forEach(p => { resolveStockExpr(p.id); });
 
       const products = {};
       let hasData = false;
