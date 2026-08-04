@@ -1328,7 +1328,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const localAt = localStorage.getItem('yakult_schedule_updated_at') || '';
         // 本機較新（剛改轉價日）唔俾雲端舊資料蓋過
         if (!localAt || (remoteAt && remoteAt > localAt)) {
-          localStorage.setItem('yakult_scheduled_prices', JSON.stringify(payload.schedule));
+          // 正規化為多段格式後再存
+          localStorage.setItem('yakult_scheduled_prices', JSON.stringify(normalizeScheduleData(payload.schedule)));
           if (remoteAt) localStorage.setItem('yakult_schedule_updated_at', remoteAt);
         }
       }
@@ -1520,25 +1521,109 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function loadScheduleData() {
       try {
         const raw = localStorage.getItem('yakult_scheduled_prices');
-        return raw ? JSON.parse(raw) : {};
+        const data = raw ? JSON.parse(raw) : {};
+        return normalizeScheduleData(data);
       } catch (e) {
         return {};
       }
     }
 
+    // 新價錢已生效後，自動刪除已過期的舊預計轉價（只保留：進行中 + 即將）
+    function pruneExpiredSchedules() {
+      const data = loadScheduleData();
+      const today = todayStr();
+      let changed = false;
+      Object.keys(data).forEach(chain => {
+        const list = (data[chain] || []).slice().sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+        if (!list.length) return;
+        let currentIdx = -1;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].effectiveDate <= today) currentIdx = i;
+        }
+        let kept;
+        if (currentIdx < 0) {
+          kept = list; // 全部尚未生效
+        } else {
+          kept = list.slice(currentIdx); // 進行中 + 之後即將
+        }
+        if (kept.length !== list.length) {
+          changed = true;
+          if (kept.length) data[chain] = kept;
+          else delete data[chain];
+        }
+      });
+      if (changed) {
+        saveScheduleData(data);
+        return true;
+      }
+      return false;
+    }
+
+    // 舊格式：{ 百佳: { effectiveDate, prices } }
+    // 新格式：{ 百佳: [ { effectiveDate, prices }, ... ] } 可同時有「進行中」+「即將轉價」
+    function normalizeScheduleData(data) {
+      if (!data || typeof data !== 'object') return {};
+      const out = {};
+      Object.keys(data).forEach(chain => {
+        const v = data[chain];
+        if (!v) return;
+        if (Array.isArray(v)) {
+          out[chain] = v
+            .filter(e => e && e.effectiveDate)
+            .map(e => ({
+              effectiveDate: e.effectiveDate,
+              prices: e.prices || {}
+            }))
+            .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+        } else if (v.effectiveDate) {
+          out[chain] = [{ effectiveDate: v.effectiveDate, prices: v.prices || {} }];
+        }
+      });
+      return out;
+    }
+
     function saveScheduleData(data) {
-      localStorage.setItem('yakult_scheduled_prices', JSON.stringify(data));
+      localStorage.setItem('yakult_scheduled_prices', JSON.stringify(normalizeScheduleData(data)));
       localStorage.setItem('yakult_schedule_updated_at', new Date().toISOString());
     }
 
+    // 某集團在指定日期應使用哪一段預計轉價（生效日 ≤ date 的最新一段）
+    function getScheduleEntryForDate(chain, date) {
+      if (!chain || !date) return null;
+      const list = loadScheduleData()[chain];
+      if (!list || !list.length) return null;
+      let best = null;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].effectiveDate <= date) best = list[i];
+        else break;
+      }
+      return best;
+    }
+
+    // 下一段轉價（生效日 > date 的最早一段）
+    function getNextScheduleEntry(chain, date) {
+      if (!chain || !date) return null;
+      const list = loadScheduleData()[chain];
+      if (!list || !list.length) return null;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].effectiveDate > date) return list[i];
+      }
+      return null;
+    }
+
+    // 相容舊呼叫：回傳「對今日／指定日」生效的那一段
+    function getScheduleEffectiveForStore(storeId, asOfDate) {
+      const chain = getStoreChain(storeId);
+      if (!chain) return null;
+      return getScheduleEntryForDate(chain, asOfDate || todayStr());
+    }
+
     // 取得某產品的建議價錢：
-    // 1) 記錄日 ≥ 預計轉價生效日 → 用預計轉價（除非該店在生效日後已有實際價錢）
-    // 2) 同店上次價錢
+    // 1) 該日生效的預計轉價（多段中選生效日 ≤ 記錄日 的最新一段）
+    // 2) 同店上次價錢（且不早於該段生效日則優先實際）
     // 3) 同集團上次價錢
     function getSuggestedPrice(storeId, prodId, beforeDate) {
       const chain = getStoreChain(storeId);
-      const schedules = loadScheduleData();
-      const schedule = chain ? schedules[chain] : null;
       const date = beforeDate || todayStr();
 
       const records = loadData()
@@ -1555,12 +1640,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         }
       }
 
+      const schedule = getScheduleEntryForDate(chain, date);
       if (schedule && schedule.effectiveDate && schedule.prices) {
         const scheduledPrice = schedule.prices[prodId];
         const hasScheduled = scheduledPrice != null && scheduledPrice !== '' && !isNaN(parseFloat(scheduledPrice));
-        // 記錄日期已到達或超過生效日
         if (hasScheduled && date >= schedule.effectiveDate) {
-          // 該店在生效日當日或之後已錄過價錢 → 用實際；否則用預計轉價
           if (storePrice != null && storePriceDate >= schedule.effectiveDate) {
             return parseFloat(storePrice);
           }
@@ -1591,28 +1675,20 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function loadScheduleForm() {
       const chain = $('scheduleChain').value;
-      const data = loadScheduleData();
       if (!chain) {
-        // 未選集團：日期與價錢都留白
         if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = '';
         $('schedulePrices').innerHTML = '';
         renderScheduleSummary();
         return;
       }
-      const entry = data[chain] || {};
-      // 有已存生效日才顯示，否則留白
-      if ($('scheduleEffectiveDate')) {
-        $('scheduleEffectiveDate').value = entry.effectiveDate || '';
-      }
-
-      // 不預填價錢；已存內容見下方摘要
+      // 新增一段時日期／價錢留白（不覆蓋其他已存時段）
+      if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = '';
       $('schedulePrices').innerHTML = PRODUCTS.map(p => `
         <div style="margin-bottom:8px;">
           <label>${p.name} 預計價錢 ($)</label>
           <input type="number" id="sched-price-${p.id}" min="0" step="0.1" placeholder="" value="">
         </div>
       `).join('');
-
       renderScheduleSummary();
     }
 
@@ -1632,24 +1708,36 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const v = $(`sched-price-${p.id}`).value;
         if (v !== '') prices[p.id] = parseFloat(v);
       });
+      if (!Object.keys(prices).length) {
+        showToast('請至少輸入一個產品價錢');
+        return;
+      }
 
       const data = loadScheduleData();
-      const prev = data[chain] && data[chain].prices ? data[chain].prices : {};
-      // 合併價錢：新輸入覆蓋舊值，未填的保留舊設定
-      const mergedPrices = { ...prev, ...prices };
-      data[chain] = { effectiveDate, prices: mergedPrices };
+      const list = (data[chain] || []).slice();
+      const idx = list.findIndex(e => e.effectiveDate === effectiveDate);
+      if (idx >= 0) {
+        // 同一生效日：合併價錢（新輸入覆蓋），不改其他時段
+        list[idx] = {
+          effectiveDate: effectiveDate,
+          prices: Object.assign({}, list[idx].prices || {}, prices)
+        };
+      } else {
+        list.push({ effectiveDate: effectiveDate, prices: prices });
+      }
+      list.sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+      data[chain] = list;
       saveScheduleData(data);
-      // 同步更新歷史：該集團、日期 ≥ 生效日 的記錄價錢
-      const updatedCount = applyScheduleToHistory(chain, effectiveDate, mergedPrices);
+
+      // 只更新「本段生效日至下一段生效前」的歷史，不改更早日期
+      const entry = list.find(e => e.effectiveDate === effectiveDate);
+      const updatedCount = applyScheduleToHistory(chain, effectiveDate, entry ? entry.prices : prices);
       renderScheduleSummary();
-      // 強制清空表單，不重新載入舊價錢
       PRODUCTS.forEach(p => {
         const el = $(`sched-price-${p.id}`);
         if (el) el.value = '';
       });
       if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = '';
-      // 重建空白輸入框，避免殘留
-      // 儲存後集團與表單全部留白
       if ($('scheduleChain')) $('scheduleChain').value = '';
       if (typeof loadScheduleForm === 'function') loadScheduleForm();
       const curStore = $('storeSelect') && $('storeSelect').value;
@@ -1659,20 +1747,31 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if ($('page-history') && !$('page-history').classList.contains('hidden')) {
         renderHistory();
       }
-      showToast(`${chain} 已儲存；已更新 ${updatedCount} 筆歷史價錢（${effectiveDate} 起）`);
+      showToast(`${chain} ${effectiveDate} 起已儲存；更新 ${updatedCount} 筆該時段歷史`);
       if (typeof syncNow === 'function') {
         try { syncNow(false, false, true); } catch (e) {}
       }
     }
 
-    // 將預計轉價寫入符合條件的歷史記錄
+    // 將預計轉價寫入歷史：只改 [本段生效日, 下一段生效日) 的記錄，不影響更早日期
     function applyScheduleToHistory(chain, effectiveDate, prices) {
       if (!chain || !effectiveDate || !prices) return 0;
+      const next = getNextScheduleEntry(chain, effectiveDate);
+      // 若剛存的就是 list 裡的一段，下一段應為 effectiveDate 之後
+      const list = loadScheduleData()[chain] || [];
+      let endDate = null;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].effectiveDate > effectiveDate) {
+          endDate = list[i].effectiveDate;
+          break;
+        }
+      }
       const all = loadData();
       let count = 0;
       all.forEach(r => {
         if (getStoreChain(r.storeId) !== chain) return;
         if (r.date < effectiveDate) return;
+        if (endDate && r.date >= endDate) return;
         if (!r.products) r.products = {};
         let changed = false;
         PRODUCTS.forEach(p => {
@@ -1693,31 +1792,62 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return count;
     }
 
+    function deleteScheduleEntry(chain, effectiveDate) {
+      if (!chain || !effectiveDate) return;
+      if (!confirm('刪除「' + chain + '」於 ' + effectiveDate + ' 起的預計轉價？')) return;
+      const data = loadScheduleData();
+      const list = (data[chain] || []).filter(e => e.effectiveDate !== effectiveDate);
+      if (list.length) data[chain] = list;
+      else delete data[chain];
+      saveScheduleData(data);
+      renderScheduleSummary();
+      showToast('已刪除該段預計轉價');
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
+      }
+    }
+
     function renderScheduleSummary() {
+      pruneExpiredSchedules();
       const data = loadScheduleData();
       const chains = Object.keys(data);
       if (!chains.length) {
         $('scheduleSummary').innerHTML = '尚未設定任何預計轉價';
         return;
       }
-      const html = '<div style="font-weight:600;margin-bottom:6px;">已設定：</div>' + chains.map(chain => {
-        const e = data[chain];
-        const priceLines = PRODUCTS.map(p => {
-          const v = e.prices && e.prices[p.id];
-          if (v == null || v === '') return null;
-          const label = p.id === 'lt' ? 'LT' : p.name.replace('益力多', '').replace(/^\s+/, '');
-          // $ 對齊：價錢用等寬數字
-          const priceText = formatPriceLabel(p.id, v);
-          return '<div style="display:grid;grid-template-columns:4.8em 1fr;font-size:0.78rem;line-height:1.7;padding:1px 2px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;">' +
-            '<span>' + label + '</span>' +
-            '<span style="text-align:left;">' + priceText + '</span>' +
+      const today = todayStr();
+      let html = '<div style="font-weight:600;margin-bottom:6px;">已設定（可同時有進行中＋即將轉價）：</div>';
+      chains.forEach(chain => {
+        const list = data[chain] || [];
+        list.forEach(e => {
+          const isCurrent = e.effectiveDate <= today && !getNextScheduleEntry(chain, e.effectiveDate);
+          // isCurrent: 若下一段也存在但未生效，本段仍是進行中
+          const next = getNextScheduleEntry(chain, e.effectiveDate);
+          const activeNow = e.effectiveDate <= today && (!next || next.effectiveDate > today);
+          const upcoming = e.effectiveDate > today;
+          let tag = '';
+          if (activeNow) tag = '<span style="color:#2e7d32;font-size:0.75rem;">（進行中）</span>';
+          else if (upcoming) tag = '<span style="color:#e65100;font-size:0.75rem;">（即將）</span>';
+          else tag = '<span style="color:#999;font-size:0.75rem;">（已過）</span>';
+          const priceLines = PRODUCTS.map(p => {
+            const v = e.prices && e.prices[p.id];
+            if (v == null || v === '') return null;
+            const label = p.id === 'lt' ? 'LT' : p.name.replace('益力多', '').replace(/^\s+/, '');
+            const priceText = formatPriceLabel(p.id, v);
+            return '<div style="display:grid;grid-template-columns:4.8em 1fr;font-size:0.78rem;line-height:1.7;padding:1px 2px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;">' +
+              '<span>' + label + '</span>' +
+              '<span style="text-align:left;">' + priceText + '</span>' +
+              '</div>';
+          }).filter(Boolean).join('');
+          html += '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+            '<div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+            '<div><strong>' + chain + '</strong>　' + (e.effectiveDate || '') + ' 起 ' + tag + '</div>' +
+            '<button type="button" class="btn-secondary" style="padding:4px 8px;font-size:0.75rem;" onclick="deleteScheduleEntry(\'' + chain + '\',\'' + e.effectiveDate + '\')">刪除</button>' +
+            '</div>' +
+            (priceLines || '<div style="font-size:0.75rem;color:#999;">（未設價錢）</div>') +
             '</div>';
-        }).filter(Boolean).join('');
-        return '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
-          '<div style="margin-bottom:4px;"><strong>' + chain + '</strong>　' + (e.effectiveDate || '') + ' 起</div>' +
-          (priceLines || '<div style="font-size:0.75rem;color:#999;">（未設價錢）</div>') +
-          '</div>';
-      }).join('');
+        });
+      });
       $('scheduleSummary').innerHTML = html;
     }
 
@@ -1945,6 +2075,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       setupDraftAutoSave();
       // 延遲還原草稿，等產品欄已渲染
       setTimeout(restoreDraftIfAny, 100);
+      // 新轉價已生效則清掉過期的舊預計
+      try { pruneExpiredSchedules(); } catch (e) {}
     }
 
     // ========== 草稿：退出 App 後仍保留未儲存的存貨／落貨 ==========
