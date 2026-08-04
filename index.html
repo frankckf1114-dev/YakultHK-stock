@@ -1963,6 +1963,70 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       renderProductForms();
       fillExportFilters();
       updatePriceAlert();
+      setupBackGuard();
+    }
+
+    // 有未儲存輸入時，按返回先確認，避免誤觸退出
+    let _backGuardArmed = false;
+    function hasUnsavedInput() {
+      const storeId = $('storeSelect') && $('storeSelect').value;
+      if (!storeId) return false;
+      for (let i = 0; i < PRODUCTS.length; i++) {
+        const p = PRODUCTS[i];
+        const s = $('stock-' + p.id);
+        const o = $('order-' + p.id);
+        if (s && String(s.value || '').trim() !== '') return true;
+        if (o && String(o.value || '').trim() !== '') return true;
+      }
+      return !!editingOriginal;
+    }
+    function armBackGuard() {
+      if (_backGuardArmed) return;
+      try {
+        history.pushState({ yakultGuard: 1 }, '');
+        _backGuardArmed = true;
+      } catch (e) {}
+    }
+    function setupBackGuard() {
+      // 首次進入也壓一層 state，方便攔截第一次返回
+      try { history.replaceState({ yakultRoot: 1 }, ''); } catch (e) {}
+      window.addEventListener('popstate', function (e) {
+        if (hasUnsavedInput()) {
+          const ok = confirm('尚有未儲存的存貨／落貨資料，確定要離開？');
+          if (!ok) {
+            // 取消離開：再推回一層，留在本頁
+            try { history.pushState({ yakultGuard: 1 }, ''); } catch (err) {}
+            _backGuardArmed = true;
+            return;
+          }
+          // 確定離開：再返回一次，以便退出 App／上一頁
+          _backGuardArmed = false;
+          setTimeout(function () {
+            try { history.back(); } catch (err) {}
+          }, 50);
+          return;
+        }
+        _backGuardArmed = false;
+      });
+      // 使用者開始輸入時武裝
+      document.addEventListener('input', function (e) {
+        if (!e.target) return;
+        const id = e.target.id || '';
+        if (id.indexOf('stock-') === 0 || id.indexOf('order-') === 0 || id === 'storeSelect') {
+          if (hasUnsavedInput()) armBackGuard();
+        }
+      }, true);
+      document.addEventListener('change', function (e) {
+        if (!e.target) return;
+        if (e.target.id === 'storeSelect' && hasUnsavedInput()) armBackGuard();
+      }, true);
+      // 關閉分頁／重新整理時提示（桌面較有效；部分手機瀏覽器支援）
+      window.addEventListener('beforeunload', function (e) {
+        if (!hasUnsavedInput()) return;
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      });
     }
 
     function filterStores() {
