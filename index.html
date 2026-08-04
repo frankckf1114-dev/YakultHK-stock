@@ -3436,8 +3436,8 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           table = '<table class="hist-table"><thead><tr><th></th>' +
             PRODUCTS.map(p => '<th>' + (short[p.id] || p.id) + '</th>').join('') +
             '</tr></thead><tbody>' +
-            '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">銷量</td>' + salesArr.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">落貨</td>' + orders.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr class="total-row"><td class="row-label">合計</td>' + totals.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">價錢</td>' + prices.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
