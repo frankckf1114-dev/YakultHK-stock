@@ -517,6 +517,53 @@
         <div id="expiryHint" style="font-size:0.8rem;color:var(--muted);margin-top:6px;"></div>
       </div>
       <div class="card">
+        <div class="card-title">🏪 店舖管理</div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">新增或刪除店舖需輸入管理密碼（預設 <code>STH086</code>），防止誤刪。</p>
+        <div id="storeManageList" style="font-size:0.82rem;margin-bottom:12px;max-height:220px;overflow-y:auto;"></div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;">
+          <div style="font-weight:600;margin-bottom:8px;">新增店舖</div>
+          <div style="margin-bottom:8px;">
+            <label>集團</label>
+            <select id="newStoreChain">
+              <option value="惠康">惠康</option>
+              <option value="百佳">百佳</option>
+              <option value="一田">一田</option>
+              <option value="Aeon">Aeon</option>
+              <option value="Donki">Donki</option>
+              <option value="佳寶">佳寶</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+          <div style="margin-bottom:8px;">
+            <label>店號（如 107）</label>
+            <input type="text" id="newStoreCode" placeholder="店號" autocomplete="off">
+          </div>
+          <div style="margin-bottom:8px;">
+            <label>店名（如 新墟）</label>
+            <input type="text" id="newStoreName" placeholder="店名" autocomplete="off">
+          </div>
+          <div style="margin-bottom:8px;">
+            <label>車期（可多選）</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:0.85rem;">
+              <label><input type="checkbox" class="newVisitDay" value="1"> 一</label>
+              <label><input type="checkbox" class="newVisitDay" value="2"> 二</label>
+              <label><input type="checkbox" class="newVisitDay" value="3"> 三</label>
+              <label><input type="checkbox" class="newVisitDay" value="4"> 四</label>
+              <label><input type="checkbox" class="newVisitDay" value="5"> 五</label>
+              <label><input type="checkbox" class="newVisitDay" value="6"> 六</label>
+              <label><input type="checkbox" class="newVisitDay" value="0"> 日</label>
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="addStoreWithPwd()">新增店舖</button>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:12px;">
+          <div style="font-weight:600;margin-bottom:6px;">更改管理密碼</div>
+          <input type="password" id="storePwdOld" placeholder="現有密碼" style="margin-bottom:6px;">
+          <input type="password" id="storePwdNew" placeholder="新密碼（至少4位）" style="margin-bottom:6px;">
+          <button type="button" class="btn btn-secondary" onclick="changeStoreAdminPwd()">更改密碼</button>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title">📅 預計轉價（按集團）</div>
         <p style="font-size:0.85rem; color:var(--muted); margin-bottom:12px;">
           預先輸入各集團的新價錢及生效日。到達該日期後，選擇該集團店舖時會自動帶出。
@@ -686,8 +733,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       { id: 'grape', name: '益力多青提味' }
     ];
 
-    // visitDays: 0=日,1=一,2=二,3=三,4=四,5=五,6=六（可在設定用歷史自動推算覆蓋）
-    const STORES = [
+    // visitDays: 0=日,1=一,2=二,3=三,4=四,5=五,6=六
+    // 預設店舖；使用者可在設定新增／刪除（需密碼）
+    const DEFAULT_STORES = [
       { id: 'wc107', name: '惠康 107 新墟', chain: '惠康', visitDays: [1,4] },
       { id: 'wc166', name: '惠康 166 翠珊閣', chain: '惠康', visitDays: [2,4] },
       { id: 'wc181', name: '惠康 181 建生', chain: '惠康', visitDays: [2,5] },
@@ -713,6 +761,137 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       { id: 'kb151', name: '佳寶 151 屯門', chain: '佳寶', visitDays: [1,4] },
       { id: 'kb214', name: '佳寶 214 仁政', chain: '佳寶', visitDays: [1,3,5] }
     ];
+
+    let STORES = loadStoresList();
+    function loadStoresList() {
+      try {
+        const raw = localStorage.getItem('yakult_stores');
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr) && arr.length) return arr;
+        }
+      } catch (e) {}
+      return DEFAULT_STORES.map(s => Object.assign({}, s));
+    }
+    function saveStoresList() {
+      localStorage.setItem('yakult_stores', JSON.stringify(STORES));
+    }
+    // 店舖管理密碼（可在設定更改）；預設 STH086
+    function getStoreAdminPwd() {
+      return localStorage.getItem('yakult_store_admin_pwd') || 'STH086';
+    }
+    function setStoreAdminPwd(pwd) {
+      if (!pwd || String(pwd).length < 4) return false;
+      localStorage.setItem('yakult_store_admin_pwd', String(pwd));
+      return true;
+    }
+    function requireStoreAdminPwd(actionLabel) {
+      const input = prompt((actionLabel || '此操作') + '需要密碼：');
+      if (input == null) return false;
+      if (input !== getStoreAdminPwd()) {
+        showToast('密碼錯誤');
+        return false;
+      }
+      return true;
+    }
+
+    function chainPrefix(chain) {
+      const map = { '惠康': 'wc', '百佳': 'pk', '一田': 'yt', 'Aeon': 'ae', 'Donki': 'dk', '佳寶': 'kb', '其他': 'ot' };
+      return map[chain] || 'st';
+    }
+    function refreshStoreDropdowns() {
+      const selects = ['storeSelect', 'historyStoreFilter', 'exportStoreFilter'];
+      selects.forEach(sid => {
+        const sel = $(sid);
+        if (!sel) return;
+        const cur = sel.value;
+        const placeholder = sid === 'storeSelect'
+          ? '<option value="">-- 請選擇店舖 --</option>'
+          : '<option value="">全部店舖</option>';
+        sel.innerHTML = placeholder;
+        STORES.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-HK')).forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = s.name;
+          sel.appendChild(opt);
+        });
+        if (cur && STORES.some(s => s.id === cur)) sel.value = cur;
+      });
+    }
+    function renderStoreManageList() {
+      const box = $('storeManageList');
+      if (!box) return;
+      if (!STORES.length) {
+        box.innerHTML = '<div style="color:var(--muted);">尚無店舖</div>';
+        return;
+      }
+      const sorted = STORES.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-HK'));
+      box.innerHTML = sorted.map(s => {
+        const days = (s.visitDays || []).map(d => DAY_NAMES[d]).join('');
+        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;">' +
+          '<div><strong>' + s.name + '</strong><span style="color:var(--muted);font-size:0.75rem;">　車期 ' + (days || '—') + '</span></div>' +
+          '<button type="button" class="btn" style="background:#dc3545;color:#fff;padding:4px 10px;font-size:0.75rem;width:auto;" onclick="deleteStoreWithPwd(\'' + s.id + '\')">刪除</button>' +
+          '</div>';
+      }).join('');
+    }
+    function addStoreWithPwd() {
+      if (!requireStoreAdminPwd('新增店舖')) return;
+      const chain = ($('newStoreChain') && $('newStoreChain').value) || '';
+      const code = (($('newStoreCode') && $('newStoreCode').value) || '').trim();
+      const namePart = (($('newStoreName') && $('newStoreName').value) || '').trim();
+      if (!chain || !code || !namePart) {
+        showToast('請填寫集團、店號、店名');
+        return;
+      }
+      const id = chainPrefix(chain) + code.replace(/\s+/g, '');
+      if (STORES.some(s => s.id === id)) {
+        showToast('此店舖編號已存在');
+        return;
+      }
+      const visitDays = [];
+      document.querySelectorAll('.newVisitDay:checked').forEach(cb => {
+        visitDays.push(parseInt(cb.value, 10));
+      });
+      if (!visitDays.length) {
+        showToast('請至少選擇一個車期');
+        return;
+      }
+      const fullName = chain + ' ' + code + ' ' + namePart;
+      STORES.push({ id: id, name: fullName, chain: chain, visitDays: visitDays });
+      saveStoresList();
+      refreshStoreDropdowns();
+      renderStoreManageList();
+      if ($('newStoreCode')) $('newStoreCode').value = '';
+      if ($('newStoreName')) $('newStoreName').value = '';
+      document.querySelectorAll('.newVisitDay').forEach(cb => { cb.checked = false; });
+      showToast('已新增 ' + fullName);
+    }
+    function deleteStoreWithPwd(storeId) {
+      const st = STORES.find(s => s.id === storeId);
+      if (!st) return;
+      if (!requireStoreAdminPwd('刪除「' + st.name + '」')) return;
+      if (!confirm('確定刪除「' + st.name + '」？\n（歷史記錄不會自動刪除，但選單不再顯示此店）')) return;
+      STORES = STORES.filter(s => s.id !== storeId);
+      saveStoresList();
+      refreshStoreDropdowns();
+      renderStoreManageList();
+      showToast('已刪除 ' + st.name);
+    }
+    function changeStoreAdminPwd() {
+      const oldP = ($('storePwdOld') && $('storePwdOld').value) || '';
+      const newP = ($('storePwdNew') && $('storePwdNew').value) || '';
+      if (oldP !== getStoreAdminPwd()) {
+        showToast('現有密碼錯誤');
+        return;
+      }
+      if (!setStoreAdminPwd(newP)) {
+        showToast('新密碼至少 4 位');
+        return;
+      }
+      if ($('storePwdOld')) $('storePwdOld').value = '';
+      if ($('storePwdNew')) $('storePwdNew').value = '';
+      showToast('管理密碼已更改');
+    }
 
     const DAY_NAMES = ['日','一','二','三','四','五','六'];
     // 安全存量：下次到店時希望仍有的數量
@@ -2046,20 +2225,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // ========== 初始化 ==========
     function init() {
-      // 填入店舖選單
-      const sel = $('storeSelect');
-      const histSel = $('historyStoreFilter');
-      STORES.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = s.name;
-        sel.appendChild(opt);
-
-        const opt2 = document.createElement('option');
-        opt2.value = s.id;
-        opt2.textContent = s.name;
-        histSel.appendChild(opt2);
-      });
+      refreshStoreDropdowns();
+      renderStoreManageList();
 
       $('recordDate').value = todayStr();
       renderExpiryInputs();
