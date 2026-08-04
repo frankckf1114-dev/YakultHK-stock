@@ -1964,11 +1964,104 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       fillExportFilters();
       updatePriceAlert();
       setupBackGuard();
+      setupDraftAutoSave();
+      // 延遲還原草稿，等產品欄已渲染
+      setTimeout(restoreDraftIfAny, 100);
     }
 
-    // 攔截系統返回：有未儲存資料時先確認（Android / 瀏覽器返回鍵）
-    let _backAllowExit = false;
-    let _backTrapOn = false;
+    // ========== 草稿：退出 App 後仍保留未儲存的存貨／落貨 ==========
+    const DRAFT_KEY = 'yakult_input_draft';
+    let _draftTimer = null;
+    function collectDraft() {
+      const storeId = ($('storeSelect') && $('storeSelect').value) || '';
+      const date = ($('recordDate') && $('recordDate').value) || todayStr();
+      const products = {};
+      let has = false;
+      PRODUCTS.forEach(p => {
+        const s = $('stock-' + p.id);
+        const o = $('order-' + p.id);
+        const stock = s ? String(s.value || '') : '';
+        const order = o ? String(o.value || '') : '';
+        products[p.id] = { stock: stock, order: order };
+        if (stock.trim() !== '' || order.trim() !== '') has = true;
+      });
+      if (!has && !storeId) return null;
+      return {
+        storeId: storeId,
+        date: date,
+        products: products,
+        editingOriginal: editingOriginal ? { storeId: editingOriginal.storeId, date: editingOriginal.date } : null,
+        savedAt: new Date().toISOString()
+      };
+    }
+    function saveDraftNow() {
+      try {
+        const d = collectDraft();
+        if (!d) {
+          localStorage.removeItem(DRAFT_KEY);
+          return;
+        }
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+      } catch (e) {}
+    }
+    function scheduleSaveDraft() {
+      if (_draftTimer) clearTimeout(_draftTimer);
+      _draftTimer = setTimeout(saveDraftNow, 300);
+    }
+    function clearDraft() {
+      try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+    }
+    function restoreDraftIfAny() {
+      let raw;
+      try { raw = localStorage.getItem(DRAFT_KEY); } catch (e) { return; }
+      if (!raw) return;
+      let d;
+      try { d = JSON.parse(raw); } catch (e) { return; }
+      if (!d || !d.products) return;
+      // 超過 3 天的草稿自動丟棄
+      if (d.savedAt) {
+        const age = Date.now() - new Date(d.savedAt).getTime();
+        if (age > 3 * 24 * 3600 * 1000) { clearDraft(); return; }
+      }
+      if (d.date && $('recordDate')) $('recordDate').value = d.date;
+      if (d.storeId && $('storeSelect')) {
+        $('storeSelect').value = d.storeId;
+        // 先載入上次存貨／價錢，再覆蓋草稿數量
+        if (typeof onStoreChange === 'function') onStoreChange();
+      }
+      PRODUCTS.forEach(p => {
+        const pr = d.products[p.id];
+        if (!pr) return;
+        const s = $('stock-' + p.id);
+        const o = $('order-' + p.id);
+        if (s && pr.stock != null && String(pr.stock) !== '') s.value = pr.stock;
+        if (o && pr.order != null && String(pr.order) !== '') o.value = pr.order;
+        if (typeof calcSuggest === 'function') calcSuggest(p.id);
+        if (typeof checkOrderAdvice === 'function') checkOrderAdvice(p.id);
+      });
+      if (d.editingOriginal) editingOriginal = d.editingOriginal;
+      showToast('已還原未儲存的輸入');
+    }
+    function setupDraftAutoSave() {
+      document.addEventListener('input', function (e) {
+        if (!e.target) return;
+        const id = e.target.id || '';
+        if (id.indexOf('stock-') === 0 || id.indexOf('order-') === 0) scheduleSaveDraft();
+      }, true);
+      document.addEventListener('change', function (e) {
+        if (!e.target) return;
+        const id = e.target.id || '';
+        if (id === 'storeSelect' || id === 'recordDate') scheduleSaveDraft();
+      }, true);
+      // 離開頁面／切去背景前再存一次
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') saveDraftNow();
+      });
+      window.addEventListener('pagehide', saveDraftNow);
+    }
+
+    // 攔截系統返回：有未儲存時每次返回都會再問（取消後再按返回仍會提示）
+    let _backExiting = false;
     function hasUnsavedInput() {
       if (editingOriginal) return true;
       for (let i = 0; i < PRODUCTS.length; i++) {
@@ -1978,56 +2071,41 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (s && String(s.value || '').trim() !== '') return true;
         if (o && String(o.value || '').trim() !== '') return true;
       }
-      const storeId = $('storeSelect') && $('storeSelect').value;
-      // 已選店但尚未填數：也視為可能中途離開，不強制攔截
       return false;
     }
     function pushBackTrap() {
       try {
         history.pushState({ yakultTrap: Date.now() }, document.title, location.href);
-        _backTrapOn = true;
       } catch (e) {}
     }
+    function onBackPopState() {
+      if (_backExiting) return;
+      // 先補回歷史層，確保「取消」後下一次返回仍可攔截
+      pushBackTrap();
+      if (!hasUnsavedInput()) {
+        _backExiting = true;
+        window.removeEventListener('popstate', onBackPopState);
+        setTimeout(function () { try { history.back(); } catch (e) {} }, 0);
+        return;
+      }
+      const ok = confirm('尚有未儲存的存貨／落貨資料，確定要離開？\n（資料已自動暫存，下次打開可還原）');
+      if (ok) {
+        _backExiting = true;
+        window.removeEventListener('popstate', onBackPopState);
+        setTimeout(function () { try { history.back(); } catch (e) {} }, 0);
+      }
+      // 取消：已 pushBackTrap，下次返回會再次觸發 onBackPopState
+    }
     function setupBackGuard() {
-      // 進 App 立刻多一層歷史，讓第一次「返回」先觸發 popstate
       try {
         history.replaceState({ yakultRoot: 1 }, document.title, location.href);
       } catch (e) {}
       pushBackTrap();
+      window.addEventListener('popstate', onBackPopState);
 
-      window.addEventListener('popstate', function () {
-        if (_backAllowExit) {
-          _backAllowExit = false;
-          return;
-        }
-        if (hasUnsavedInput()) {
-          // 先補回一層，避免對話框期間再被系統退出
-          pushBackTrap();
-          const ok = confirm('尚有未儲存的存貨／落貨資料，確定要離開？');
-          if (ok) {
-            _backAllowExit = true;
-            _backTrapOn = false;
-            setTimeout(function () {
-              try { history.go(-2); } catch (err) {
-                try { history.back(); } catch (e2) {}
-              }
-            }, 10);
-          }
-          // 取消：已 pushBackTrap，資料保留
-        } else {
-          // 無未儲存內容：允許離開
-          _backAllowExit = true;
-          _backTrapOn = false;
-          setTimeout(function () {
-            try { history.back(); } catch (err) {}
-          }, 10);
-        }
-      });
-
-      // 每次從背景回到前景再確保有 trap
       document.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'visible') {
-          if (!_backTrapOn) pushBackTrap();
+        if (document.visibilityState === 'visible' && !_backExiting) {
+          pushBackTrap();
         }
       });
 
@@ -3226,6 +3304,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       });
       $('storeSelect').value = '';
       onStoreChange();
+      clearDraft();
       showToast('已清除輸入');
     }
 
@@ -3310,6 +3389,9 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       if (typeof clearDeletedKey === 'function') clearDeletedKey(storeId, date);
       saveData(records);
       editingOriginal = null;
+
+      // 已正式儲存 → 清除草稿
+      clearDraft();
 
       if (isUpdate || moved) {
         // 修改或搬移後：保留資料在畫面上
