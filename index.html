@@ -518,8 +518,9 @@
       </div>
       <div class="card">
         <div class="card-title">🏪 店舖管理</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">新增或刪除店舖需輸入管理密碼（預設 <code>STH086</code>），防止誤刪。</p>
-        <div id="storeManageList" style="font-size:0.82rem;margin-bottom:12px;max-height:220px;overflow-y:auto;"></div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">可自由新增店舖及設定產品；刪除店舖時會再確認一次。</p>
+        <div id="storeManageList" style="font-size:0.82rem;margin-bottom:12px;max-height:260px;overflow-y:auto;"></div>
+        <div id="storeProductEditPanel" class="hidden" style="background:#fafafa;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;"></div>
         <div style="border-top:1px solid var(--border);padding-top:10px;">
           <div style="font-weight:600;margin-bottom:8px;">新增店舖</div>
           <div style="margin-bottom:8px;">
@@ -726,12 +727,55 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
   <script>
     // ========== 資料定義 ==========
+    // 全產品目錄（報告／設定用）；每間店另有 productIds 決定可售
     const PRODUCTS = [
       { id: '5pack', name: '益力多五支裝' },
       { id: '10pack', name: '益力多十支裝' },
       { id: 'lt', name: '益力多 LT' },
-      { id: 'grape', name: '益力多青提味' }
+      { id: 'grape', name: '益力多青提味' },
+      { id: 'joie_orig', name: 'Joie 原味' },
+      { id: 'joie_blue', name: 'Joie 藍莓味' },
+      { id: 'joie_straw', name: 'Joie 士多啤梨味' },
+      { id: 'joie_grape', name: 'Joie 青提味' },
+      { id: 'y1000', name: 'Y1000' }
     ];
+
+    const CORE_PRODUCT_IDS = ['5pack', '10pack', 'lt', 'grape'];
+    const JOIE_Y1000_IDS = ['joie_orig', 'joie_blue', 'joie_straw', 'joie_grape', 'y1000'];
+
+    // 各集團預設可售產品：惠康不含青提；Aeon／Donki 含 Joie、Y1000
+    function defaultProductIdsForChain(chain) {
+      if (chain === '惠康') return ['5pack', '10pack', 'lt'];
+      if (chain === 'Aeon' || chain === 'Donki') return CORE_PRODUCT_IDS.concat(JOIE_Y1000_IDS);
+      return CORE_PRODUCT_IDS.slice();
+    }
+
+    function getProductById(id) {
+      return PRODUCTS.find(p => p.id === id) || null;
+    }
+
+    function getStoreProductIds(storeId) {
+      const st = STORES.find(s => s.id === storeId);
+      if (!st) return CORE_PRODUCT_IDS.slice();
+      if (Array.isArray(st.productIds) && st.productIds.length) return st.productIds.slice();
+      return defaultProductIdsForChain(st.chain);
+    }
+
+    function getStoreProducts(storeId) {
+      return getStoreProductIds(storeId).map(id => getProductById(id)).filter(Boolean);
+    }
+
+    function ensureStoreProductIds(store) {
+      if (!store) return store;
+      if (!Array.isArray(store.productIds) || !store.productIds.length) {
+        store.productIds = defaultProductIdsForChain(store.chain);
+      }
+      // 惠康：若從未手動加過青提，確保不含 grape（舊資料可能仍有）
+      if (store.chain === '惠康' && store.productIds.indexOf('grape') >= 0 && !store.grapeEnabled) {
+        store.productIds = store.productIds.filter(id => id !== 'grape');
+      }
+      return store;
+    }
 
     // visitDays: 0=日,1=一,2=二,3=三,4=四,5=五,6=六
     // 預設店舖；使用者可在設定新增／刪除（需密碼）
@@ -760,7 +804,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       { id: 'kb106', name: '佳寶 106 置樂', chain: '佳寶', visitDays: [1,4] },
       { id: 'kb151', name: '佳寶 151 屯門', chain: '佳寶', visitDays: [1,4] },
       { id: 'kb214', name: '佳寶 214 仁政', chain: '佳寶', visitDays: [1,3,5] }
-    ];
+    ].map(s => {
+      s.productIds = defaultProductIdsForChain(s.chain);
+      return s;
+    });
 
     let STORES = loadStoresList();
     function loadStoresList() {
@@ -768,10 +815,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const raw = localStorage.getItem('yakult_stores');
         if (raw) {
           const arr = JSON.parse(raw);
-          if (Array.isArray(arr) && arr.length) return arr;
+          if (Array.isArray(arr) && arr.length) {
+            return arr.map(s => ensureStoreProductIds(Object.assign({}, s)));
+          }
         }
       } catch (e) {}
-      return DEFAULT_STORES.map(s => Object.assign({}, s));
+      return DEFAULT_STORES.map(s => Object.assign({}, s, { productIds: (s.productIds || defaultProductIdsForChain(s.chain)).slice() }));
     }
     function saveStoresList() {
       localStorage.setItem('yakult_stores', JSON.stringify(STORES));
@@ -828,14 +877,81 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const sorted = STORES.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-HK'));
       box.innerHTML = sorted.map(s => {
         const days = (s.visitDays || []).map(d => DAY_NAMES[d]).join('');
-        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;">' +
+        const pids = getStoreProductIds(s.id);
+        const pNames = pids.map(id => {
+          const p = getProductById(id);
+          return p ? productShortCode(id) : id;
+        }).join('、');
+        return '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
           '<div><strong>' + s.name + '</strong><span style="color:var(--muted);font-size:0.75rem;">　車期 ' + (days || '—') + '</span></div>' +
+          '<div style="display:flex;gap:4px;">' +
+          '<button type="button" class="btn btn-secondary" style="padding:4px 8px;font-size:0.75rem;width:auto;" onclick="editStoreProducts(\'' + s.id + '\')">產品</button>' +
           '<button type="button" class="btn" style="background:#dc3545;color:#fff;padding:4px 10px;font-size:0.75rem;width:auto;" onclick="deleteStoreWithPwd(\'' + s.id + '\')">刪除</button>' +
+          '</div></div>' +
+          '<div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">可售：' + (pNames || '—') + '</div>' +
           '</div>';
       }).join('');
     }
+
+    function editStoreProducts(storeId) {
+      const st = STORES.find(s => s.id === storeId);
+      if (!st) return;
+      const current = getStoreProductIds(storeId);
+      const lines = PRODUCTS.map(p => {
+        const checked = current.indexOf(p.id) >= 0 ? ' checked' : '';
+        return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.9rem;">' +
+          '<input type="checkbox" class="storeProdCb" value="' + p.id + '"' + checked + '> ' + p.name +
+          '</label>';
+      }).join('');
+      const panel = $('storeProductEditPanel');
+      if (panel) {
+        panel.classList.remove('hidden');
+        panel.innerHTML =
+          '<div style="font-weight:600;margin-bottom:8px;">設定產品：' + st.name + '</div>' +
+          lines +
+          '<div style="display:flex;gap:8px;margin-top:10px;">' +
+          '<button type="button" class="btn btn-primary" style="width:auto;flex:1;" onclick="saveStoreProducts(\'' + storeId + '\')">儲存產品</button>' +
+          '<button type="button" class="btn btn-secondary" style="width:auto;flex:1;" onclick="cancelStoreProductEdit()">取消</button>' +
+          '</div>';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        // fallback: prompt style not ideal; create temporary
+        showToast('請在設定頁操作');
+      }
+    }
+    function cancelStoreProductEdit() {
+      const panel = $('storeProductEditPanel');
+      if (panel) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+      }
+    }
+    function saveStoreProducts(storeId) {
+      const st = STORES.find(s => s.id === storeId);
+      if (!st) return;
+      const ids = [];
+      document.querySelectorAll('.storeProdCb:checked').forEach(cb => ids.push(cb.value));
+      if (!ids.length) {
+        showToast('請至少選擇一個產品');
+        return;
+      }
+      st.productIds = ids;
+      // 惠康若手動勾選青提，標記已啟用
+      if (st.chain === '惠康' && ids.indexOf('grape') >= 0) st.grapeEnabled = true;
+      if (st.chain === '惠康' && ids.indexOf('grape') < 0) st.grapeEnabled = false;
+      saveStoresList();
+      cancelStoreProductEdit();
+      renderStoreManageList();
+      // 若正在記錄此店，刷新輸入區
+      if ($('storeSelect') && $('storeSelect').value === storeId) {
+        renderProductForms();
+        onStoreChange();
+      }
+      showToast('已更新「' + st.name + '」可售產品');
+    }
+
     function addStoreWithPwd() {
-      if (!requireStoreAdminPwd('新增店舖')) return;
       const chain = ($('newStoreChain') && $('newStoreChain').value) || '';
       const code = (($('newStoreCode') && $('newStoreCode').value) || '').trim();
       const namePart = (($('newStoreName') && $('newStoreName').value) || '').trim();
@@ -857,7 +973,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       const fullName = chain + ' ' + code + ' ' + namePart;
-      STORES.push({ id: id, name: fullName, chain: chain, visitDays: visitDays });
+      STORES.push({
+        id: id,
+        name: fullName,
+        chain: chain,
+        visitDays: visitDays,
+        productIds: defaultProductIdsForChain(chain)
+      });
       saveStoresList();
       refreshStoreDropdowns();
       renderStoreManageList();
@@ -869,12 +991,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function deleteStoreWithPwd(storeId) {
       const st = STORES.find(s => s.id === storeId);
       if (!st) return;
-      if (!requireStoreAdminPwd('刪除「' + st.name + '」')) return;
-      if (!confirm('確定刪除「' + st.name + '」？\n（歷史記錄不會自動刪除，但選單不再顯示此店）')) return;
+      if (!confirm('確定要刪除店舖「' + st.name + '」？\n\n刪除後選單將不再顯示此店。\n（歷史記錄仍會保留，不會一併刪除）')) return;
       STORES = STORES.filter(s => s.id !== storeId);
       saveStoresList();
       refreshStoreDropdowns();
       renderStoreManageList();
+      if ($('storeSelect') && $('storeSelect').value === storeId) {
+        $('storeSelect').value = '';
+        if (typeof onStoreChange === 'function') onStoreChange();
+      }
       showToast('已刪除 ' + st.name);
     }
     function changeStoreAdminPwd() {
@@ -934,17 +1059,25 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return v;
     }
 
-    // 1條 = 10排（五支裝／LT／青提）；十支裝 1條 = 5排
+    // 1條：十支裝=5排；Y1000=1支；其餘（五支裝／LT／青提／Joie）=10排
     function getStripSize(prodId) {
-      return prodId === '10pack' ? 5 : 10;
+      if (prodId === '10pack') return 5;
+      if (prodId === 'y1000') return 1;
+      return 10;
     }
-    // 報告用「支」：五支裝／LT／青提 1排=5支；十支裝 1排=10支
+    // 報告用「支」
     function bottlesPerRow(prodId) {
-      return prodId === '10pack' ? 10 : 5;
+      if (prodId === '10pack') return 10;
+      if (prodId === 'y1000') return 1;
+      return 5;
     }
     // 報告欄位簡稱：五支裝Y5、十支裝Y10、LT、青提MU
     function productShortCode(prodId) {
-      const map = { '5pack': 'Y5', '10pack': 'Y10', 'lt': 'LT', 'grape': 'MU' };
+      const map = {
+        '5pack': 'Y5', '10pack': 'Y10', 'lt': 'LT', 'grape': 'MU',
+        'joie_orig': 'JO', 'joie_blue': 'JB', 'joie_straw': 'JS', 'joie_grape': 'JG',
+        'y1000': 'Y1K'
+      };
       return map[prodId] || prodId;
     }
     function toBottles(prodId, rows) {
@@ -2400,12 +2533,19 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function renderProductForms() {
       const list = $('productsList');
-      // 流程：先全部點存貨，再決定落貨
+      if (!list) return;
+      const storeId = ($('storeSelect') && $('storeSelect').value) || '';
+      // 有選店則只顯示該店可售產品；未選店時顯示核心四款作佔位
+      const prods = storeId ? getStoreProducts(storeId) : PRODUCTS.filter(p => CORE_PRODUCT_IDS.indexOf(p.id) >= 0);
+      if (!prods.length) {
+        list.innerHTML = '<div class="card" style="padding:12px;color:var(--muted);">此店尚未設定可售產品，請到「設定 → 店舖管理 → 產品」勾選。</div>';
+        return;
+      }
       const stockBlock = `
         <div class="card" style="margin-bottom:12px;padding:12px;">
           <div class="card-title" style="margin-bottom:8px;">① 點存貨</div>
           <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">到店先記各產品現有存貨；按 Enter 跳至下一產品。</p>
-          ${PRODUCTS.map(p => `
+          ${prods.map(p => `
             <div class="product-card" id="prod-stock-${p.id}" style="margin-bottom:10px;">
               <div class="product-name">${p.name}
                 <span style="font-weight:400;font-size:0.8rem;color:var(--muted);margin-left:6px;" id="priceDisplay-${p.id}">—</span>
@@ -2415,7 +2555,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
                 <span class="value" id="last-${p.id}">—</span>
               </div>
               <div style="margin-top:6px;">
-                <label>今次存貨（排）</label>
+                <label>今次存貨（${p.id === 'y1000' ? '支' : '排'}）</label>
                 <input type="number" class="stock-input" id="stock-${p.id}" min="0" step="1" inputmode="numeric" enterkeyhint="next" placeholder="" oninput="calcSuggest('${p.id}')">
               </div>
               <div class="info-row" style="margin-top:6px;">
@@ -2430,7 +2570,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         <div class="card" style="margin-bottom:12px;padding:12px;">
           <div class="card-title" style="margin-bottom:8px;">② 決定落貨</div>
           <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">存貨記完後，再按建議決定落貨；最後一欄按 Enter 可儲存。</p>
-          ${PRODUCTS.map(p => `
+          ${prods.map(p => `
             <div class="product-card" id="prod-order-${p.id}" style="margin-bottom:10px;">
               <div class="product-name">${p.name}</div>
               <div class="info-row">
@@ -2441,8 +2581,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
                 <span class="suggest" id="suggest-${p.id}">—</span>
               </div>
               <div style="margin-top:6px;">
-                <label>實際落貨（排）</label>
-                <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="輸入落貨數" oninput="checkOrderAdvice('${p.id}')">
+                <label>實際落貨（${p.id === 'y1000' ? '支' : '排'}）</label>
+                <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="" oninput="checkOrderAdvice('${p.id}')">
                 <div class="order-advice" id="orderAdvice-${p.id}" style="font-size:0.8rem;margin-top:4px;color:var(--muted);"></div>
               </div>
             </div>
@@ -2454,9 +2594,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // Enter：先走完所有「今次存貨」，再走「落貨」；最後一欄 → 儲存
     function setupEnterNavigation() {
+      const storeId = ($('storeSelect') && $('storeSelect').value) || '';
+      const prods = storeId ? getStoreProducts(storeId) : PRODUCTS.filter(p => CORE_PRODUCT_IDS.indexOf(p.id) >= 0);
       const fields = [];
-      PRODUCTS.forEach(p => { fields.push($(`stock-${p.id}`)); });
-      PRODUCTS.forEach(p => { fields.push($(`order-${p.id}`)); });
+      prods.forEach(p => { fields.push($('stock-' + p.id)); });
+      prods.forEach(p => { fields.push($('order-' + p.id)); });
       fields.forEach((el, i) => {
         if (!el) return;
         el.onkeydown = function (e) {
@@ -2494,19 +2636,20 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         ? `上次：${last.date}`
         : '尚無歷史記錄';
 
-      PRODUCTS.forEach(p => {
+      getStoreProducts(storeId).forEach(p => {
+        const lastEl = $('last-' + p.id);
+        if (!lastEl) return;
         const lastStock = last ? getEffectiveStock(last.products[p.id]) : null;
-        $(`last-${p.id}`).textContent = lastStock !== null ? lastStock : '—';
-        // 日期變更時更新參考價錢，不改動存貨／落貨輸入
+        lastEl.textContent = lastStock !== null ? lastStock : '—';
         const suggested = getSuggestedPrice(storeId, p.id, date);
-        $(`price-${p.id}`).value = suggested !== null ? suggested : '';
-        if ($(`priceDisplay-${p.id}`)) {
-          $(`priceDisplay-${p.id}`).textContent = suggested !== null ? formatPriceLabel(p.id, suggested) : '—';
+        if ($('price-' + p.id)) $('price-' + p.id).value = suggested !== null ? suggested : '';
+        if ($('priceDisplay-' + p.id)) {
+          $('priceDisplay-' + p.id).textContent = suggested !== null ? formatPriceLabel(p.id, suggested) : '—';
         }
       });
       checkStaleStockForStore(storeId, date);
       checkDiscountSalesNotice(storeId, date);
-      PRODUCTS.forEach(p => { calcSuggest(p.id); });
+      getStoreProducts(storeId).forEach(p => { calcSuggest(p.id); });
     }
 
     function onStoreChange() {
@@ -2528,6 +2671,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       $('noStoreMsg').classList.add('hidden');
       updatePriceAlert();
 
+      // 按該店可售產品重繪輸入區
+      renderProductForms();
+
       const last = getLastRecord(storeId, date);
       const existing = getRecord(storeId, date);
 
@@ -2540,44 +2686,33 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         ? `上次：${last.date}`
         : '尚無歷史記錄';
 
-      const chain = getStoreChain(storeId);
+      const prods = getStoreProducts(storeId);
+      prods.forEach(p => {
+        const lastEl = $('last-' + p.id);
+        if (!lastEl) return;
+        const lastStock = last ? getEffectiveStock(last.products && last.products[p.id]) : null;
+        lastEl.textContent = lastStock !== null ? lastStock : '—';
 
-      PRODUCTS.forEach(p => {
-        const lastStock = last ? getEffectiveStock(last.products[p.id]) : null;
-        $(`last-${p.id}`).textContent = lastStock !== null ? lastStock : '—';
-
-        // 惠康暫不售青提味
-        if (chain === '惠康' && p.id === 'grape') {
-          $(`stock-${p.id}`).value = '';
-          $(`order-${p.id}`).value = '';
-          $(`price-${p.id}`).value = '';
-          $(`priceDisplay-${p.id}`).textContent = '暫不售';
-          $(`sold-${p.id}`).textContent = '—';
-          $(`suggest-${p.id}`).textContent = '—';
-          return;
-        }
-
-        if (isEditing && existing && existing.products[p.id]) {
-          $(`stock-${p.id}`).value = existing.products[p.id].stock ?? '';
-          $(`order-${p.id}`).value = existing.products[p.id].order ?? '';
+        if (isEditing && existing && existing.products && existing.products[p.id]) {
+          if ($('stock-' + p.id)) $('stock-' + p.id).value = existing.products[p.id].stock ?? '';
+          if ($('order-' + p.id)) $('order-' + p.id).value = existing.products[p.id].order ?? '';
           const pr = existing.products[p.id].price;
-          $(`price-${p.id}`).value = pr != null ? pr : '';
-          $(`priceDisplay-${p.id}`).textContent = pr != null ? formatPriceLabel(p.id, pr) : '—';
+          if ($('price-' + p.id)) $('price-' + p.id).value = pr != null ? pr : '';
+          if ($('priceDisplay-' + p.id)) $('priceDisplay-' + p.id).textContent = pr != null ? formatPriceLabel(p.id, pr) : '—';
         } else {
-          $(`stock-${p.id}`).value = '';
-          $(`order-${p.id}`).value = '';
-          // 價錢自動沿用（同店／同集團／預計轉價），無需手填
+          if ($('stock-' + p.id)) $('stock-' + p.id).value = '';
+          if ($('order-' + p.id)) $('order-' + p.id).value = '';
           const suggested = getSuggestedPrice(storeId, p.id, date);
-          $(`price-${p.id}`).value = suggested !== null ? suggested : '';
-          $(`priceDisplay-${p.id}`).textContent = suggested !== null ? formatPriceLabel(p.id, suggested) : '—';
+          if ($('price-' + p.id)) $('price-' + p.id).value = suggested !== null ? suggested : '';
+          if ($('priceDisplay-' + p.id)) $('priceDisplay-' + p.id).textContent = suggested !== null ? formatPriceLabel(p.id, suggested) : '—';
         }
       });
       checkStaleStockForStore(storeId, date);
       checkDiscountSalesNotice(storeId, date);
-      PRODUCTS.forEach(p => { calcSuggest(p.id); });
+      prods.forEach(p => { calcSuggest(p.id); });
       // 選店後自動聚焦第一個「今次存貨」，方便立即點貨
       setTimeout(function () {
-        const first = $('stock-' + PRODUCTS[0].id);
+        const first = prods.length ? $('stock-' + prods[0].id) : null;
         if (first && !editingOriginal) {
           first.focus();
           if (typeof first.select === 'function') first.select();
@@ -2842,10 +2977,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const ack = loadExchangeAck();
       const issues = [];
 
-      PRODUCTS.forEach(p => {
-        // 惠康無青提
-        if (p.id === 'grape' && getStoreChain(storeId) === '惠康') return;
-
+      getStoreProducts(storeId).forEach(p => {
         const key = ackKey(storeId, p.id, date);
         if (ack[key] === 'exchanged' || ack[key] === 'dismiss') return;
 
@@ -3575,12 +3707,19 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       }
 
       list.innerHTML = records.map(r => {
-        const short = { '5pack': 'Y5', '10pack': 'Y10', 'lt': 'LT', 'grape': 'MU' };
         const prev = getLastRecord(r.storeId, r.date);
+        // 歷史顯示：該店可售產品 ∪ 本筆記錄有資料的產品
+        const idSet = {};
+        getStoreProductIds(r.storeId).forEach(id => { idSet[id] = true; });
+        if (r.products) Object.keys(r.products).forEach(id => {
+          const pr = r.products[id];
+          if (pr && (pr.stock != null || pr.order != null || pr.price != null)) idSet[id] = true;
+        });
+        const histProds = PRODUCTS.filter(p => idSet[p.id]);
         let hasAny = false;
         const stocks = [], salesArr = [], orders = [], totals = [], prices = [];
-        PRODUCTS.forEach(p => {
-          const pr = r.products[p.id] || {};
+        histProds.forEach(p => {
+          const pr = (r.products && r.products[p.id]) || {};
           const stock = pr.stock != null && pr.stock !== '' ? Number(pr.stock) : null;
           const order = pr.order != null && pr.order !== '' ? Number(pr.order) : null;
           const total = (stock != null || order != null)
@@ -3599,9 +3738,9 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           prices.push(pr.price != null ? formatPriceLabel(p.id, pr.price) : '—');
         });
         let table = '';
-        if (hasAny) {
+        if (hasAny && histProds.length) {
           table = '<table class="hist-table"><thead><tr><th></th>' +
-            PRODUCTS.map(p => '<th>' + (short[p.id] || p.id) + '</th>').join('') +
+            histProds.map(p => '<th>' + productShortCode(p.id) + '</th>').join('') +
             '</tr></thead><tbody>' +
             '<tr><td class="row-label">銷量</td>' + salesArr.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
@@ -3729,7 +3868,12 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           summary[sid].visits += 1;
 
           PRODUCTS.forEach(p => {
-            if (chain === '惠康' && p.id === 'grape') return;
+            // 僅統計該店有售／記錄有數據的產品
+            const storeIds = getStoreProductIds(sid);
+            if (storeIds.indexOf(p.id) < 0) {
+              const pr0 = r.products && r.products[p.id];
+              if (!pr0 || (pr0.stock == null && pr0.order == null)) return;
+            }
             const pr = (r.products && r.products[p.id]) || {};
             const prevPr = prev && prev.products && prev.products[p.id] ? prev.products[p.id] : null;
             const lastTotal = prevPr ? getEffectiveStock(prevPr) : null;
