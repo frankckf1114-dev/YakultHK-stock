@@ -518,7 +518,7 @@
       </div>
       <div class="card">
         <div class="card-title">🏪 店舖管理</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">可自由新增店舖及設定產品；刪除店舖時會再確認一次。</p>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">新增或刪除店舖需輸入管理密碼（預設 <code>STH086</code>），防止誤刪。</p>
         <div id="storeManageList" style="font-size:0.82rem;margin-bottom:12px;max-height:260px;overflow-y:auto;"></div>
         <div id="storeProductEditPanel" class="hidden" style="background:#fafafa;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;"></div>
         <div style="border-top:1px solid var(--border);padding-top:10px;">
@@ -897,6 +897,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function editStoreProducts(storeId) {
       const st = STORES.find(s => s.id === storeId);
       if (!st) return;
+      if (!requireStoreAdminPwd('修改「' + st.name + '」產品')) return;
       const current = getStoreProductIds(storeId);
       const lines = PRODUCTS.map(p => {
         const checked = current.indexOf(p.id) >= 0 ? ' checked' : '';
@@ -952,6 +953,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     function addStoreWithPwd() {
+      if (!requireStoreAdminPwd('新增店舖')) return;
       const chain = ($('newStoreChain') && $('newStoreChain').value) || '';
       const code = (($('newStoreCode') && $('newStoreCode').value) || '').trim();
       const namePart = (($('newStoreName') && $('newStoreName').value) || '').trim();
@@ -991,15 +993,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function deleteStoreWithPwd(storeId) {
       const st = STORES.find(s => s.id === storeId);
       if (!st) return;
-      if (!confirm('確定要刪除店舖「' + st.name + '」？\n\n刪除後選單將不再顯示此店。\n（歷史記錄仍會保留，不會一併刪除）')) return;
+      if (!requireStoreAdminPwd('刪除「' + st.name + '」')) return;
+      if (!confirm('確定刪除「' + st.name + '」？\n（歷史記錄不會自動刪除，但選單不再顯示此店）')) return;
       STORES = STORES.filter(s => s.id !== storeId);
       saveStoresList();
       refreshStoreDropdowns();
       renderStoreManageList();
-      if ($('storeSelect') && $('storeSelect').value === storeId) {
-        $('storeSelect').value = '';
-        if (typeof onStoreChange === 'function') onStoreChange();
-      }
       showToast('已刪除 ' + st.name);
     }
     function changeStoreAdminPwd() {
