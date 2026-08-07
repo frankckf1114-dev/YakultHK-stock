@@ -2110,6 +2110,36 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return count;
     }
 
+    // 載入某段預計轉價到表單以便修改（集團突然轉價時用）
+    function editScheduleEntry(chain, effectiveDate) {
+      if (!chain || !effectiveDate) return;
+      const data = loadScheduleData();
+      const list = data[chain] || [];
+      const entry = list.find(e => e.effectiveDate === effectiveDate);
+      if (!entry) {
+        showToast('找不到該段預計轉價');
+        return;
+      }
+      if ($('scheduleChain')) $('scheduleChain').value = chain;
+      // 先渲染價錢輸入框
+      if (typeof loadScheduleForm === 'function') {
+        // loadScheduleForm 會清空日期；改手動填
+        $('schedulePrices').innerHTML = PRODUCTS.map(p => {
+          const v = entry.prices && entry.prices[p.id] != null ? entry.prices[p.id] : '';
+          return '<div style="margin-bottom:8px;">' +
+            '<label>' + p.name + ' 預計價錢 ($)</label>' +
+            '<input type="number" id="sched-price-' + p.id + '" min="0" step="0.1" placeholder="" value="' + v + '">' +
+            '</div>';
+        }).join('');
+      }
+      if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = effectiveDate;
+      if ($('scheduleChain')) $('scheduleChain').value = chain;
+      showToast('已載入「' + chain + '」' + effectiveDate + ' 起，修改後按儲存');
+      // 捲動到表單
+      const card = $('scheduleEffectiveDate');
+      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
     function deleteScheduleEntry(chain, effectiveDate) {
       if (!chain || !effectiveDate) return;
       if (!confirm('刪除「' + chain + '」於 ' + effectiveDate + ' 起的預計轉價？')) return;
@@ -2160,8 +2190,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           html += '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
             '<div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
             '<div><strong>' + chain + '</strong>　' + (e.effectiveDate || '') + ' 起 ' + tag + '</div>' +
-            '<button type="button" class="btn-secondary" style="padding:4px 8px;font-size:0.75rem;" onclick="deleteScheduleEntry(\'' + chain + '\',\'' + e.effectiveDate + '\')">刪除</button>' +
-            '</div>' +
+            '<span style="display:flex;gap:6px;flex-shrink:0;">' +
+            '<button type="button" class="btn btn-secondary" style="padding:4px 8px;font-size:0.75rem;width:auto;" onclick="editScheduleEntry(\'' + chain + '\',\'' + e.effectiveDate + '\')">修改</button>' +
+            '<button type="button" class="btn" style="padding:4px 8px;font-size:0.75rem;width:auto;background:#dc3545;color:#fff;" onclick="deleteScheduleEntry(\'' + chain + '\',\'' + e.effectiveDate + '\')">刪除</button>' +
+            '</span></div>' +
             (priceLines || '<div style="font-size:0.75rem;color:#999;">（未設價錢）</div>') +
             '</div>';
         });
@@ -3677,29 +3709,21 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       saveData(records);
       editingOriginal = null;
 
-      // 已正式儲存 → 清除草稿
+      // 已正式儲存 → 清除草稿，並清空表單（含載入修改後儲存）
       clearDraft();
-
-      if (isUpdate || moved) {
-        // 修改或搬移後：保留資料在畫面上
-        onStoreChange();
-        showToast(moved ? `已搬移至 ${date}` : '已更新記錄');
-        if (getSyncSettings().enabled && isSyncConfigured()) { setTimeout(function(){ syncNow(false, false, true); }, 300); }
-      } else {
-        // 新記錄：自動清除，方便選下一間店
-        prods.forEach(p => {
-          const s = $('stock-' + p.id);
-          const pr = $('price-' + p.id);
-          const o = $('order-' + p.id);
-          if (s) s.value = '';
-          if (pr) pr.value = '';
-          if (o) o.value = '';
-          if (typeof calcSuggest === 'function') calcSuggest(p.id);
-        });
-        $('storeSelect').value = '';
-        onStoreChange();
-        showToast('已儲存，可選擇下一間店');
-        if (getSyncSettings().enabled && isSyncConfigured()) { setTimeout(function(){ syncNow(false, false, true); }, 300); }
+      prods.forEach(p => {
+        const s = $('stock-' + p.id);
+        const pr = $('price-' + p.id);
+        const o = $('order-' + p.id);
+        if (s) s.value = '';
+        if (pr) pr.value = '';
+        if (o) o.value = '';
+      });
+      if ($('storeSelect')) $('storeSelect').value = '';
+      onStoreChange();
+      showToast(moved ? ('已搬移至 ' + date + ' 並清空') : (isUpdate ? '已更新並清空' : '已儲存，可選擇下一間店'));
+      if (getSyncSettings().enabled && isSyncConfigured()) {
+        setTimeout(function () { syncNow(false, false, true); }, 300);
       }
     }
 
