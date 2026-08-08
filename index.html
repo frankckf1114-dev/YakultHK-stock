@@ -1070,8 +1070,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function productShortCode(prodId) {
       const map = {
         '5pack': 'Y5', '10pack': 'Y10', 'lt': 'LT', 'grape': 'MU',
-        'joie_orig': 'JO', 'joie_blue': 'JB', 'joie_straw': 'JS', 'joie_grape': 'JG',
-        'y1000': 'Y1K'
+        'joie_orig': 'P', 'joie_blue': 'B', 'joie_straw': 'S', 'joie_grape': 'M',
+        'y1000': 'Y1000'
       };
       return map[prodId] || prodId;
     }
