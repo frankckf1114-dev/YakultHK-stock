@@ -422,7 +422,7 @@
         </svg>
         <div>
           <h1>存貨管理</h1>
-          <div class="subtitle">香港益力多 · 每日落貨記錄 · v3.0</div>
+          <div class="subtitle">香港益力多 · 每日落貨記錄</div>
         </div>
       </div>
       <img class="yakult-brand-logo" src="./yakult_logo.png" alt="Yakult 益力多" onerror="this.style.display='none'">
@@ -506,6 +506,78 @@
     </div>
 
     <!-- 設定頁 -->
+    <div id="page-tools" class="hidden">
+<div class="card" id="expiryCard">
+        <div class="card-title">📅 出貨到期日（每日每產品輸入一次）</div>
+        <div id="expirySavedList" style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;line-height:1.6;"></div>
+        <div style="margin-bottom:10px;">
+          <label id="expiryDateLabel">適用日期（新輸入）</label>
+          <input type="date" id="expiryDatePicker" onchange="onExpiryDatePickerChange()">
+        </div>
+        <div id="expiryEditBar" class="hidden" style="margin-bottom:8px;">
+          <span id="expiryEditLabel" style="font-size:0.85rem;color:var(--primary);font-weight:600;"></span>
+          <button type="button" class="btn btn-secondary" style="margin-top:6px;padding:8px;" onclick="cancelExpiryEdit()">取消編輯</button>
+        </div>
+        <div id="expiryInputs"></div>
+        <button type="button" class="btn btn-primary hidden" id="btnConfirmExpiry" style="margin-top:10px;" onclick="confirmExpirySave()">確定</button>
+        <div id="expiryHint" style="font-size:0.8rem;color:var(--muted);margin-top:6px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">📅 預計轉價（按集團）</div>
+        <div style="margin-bottom:10px;">
+          <label>生效日期</label>
+          <input type="date" id="scheduleEffectiveDate">
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>集團</label>
+          <select id="scheduleChain" onchange="loadScheduleForm()">
+            <option value="" selected></option>
+            <option value="惠康">惠康</option>
+            <option value="百佳">百佳</option>
+            <option value="一田">一田</option>
+            <option value="Aeon">Aeon</option>
+            <option value="Donki">Donki</option>
+            <option value="佳寶">佳寶</option>
+          </select>
+        </div>
+        <div id="schedulePrices"></div>
+        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
+        <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
+      </div>
+      <div class="card" id="storeDiscountLogCard">
+        <div class="card-title">🏷 全店折扣記錄（參考用）</div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
+          記錄全店折扣日（例如全店 88 折）。下次到店時，若該段銷量期間包含折扣，銷量旁將顯示 🏷 標記。<strong>此記錄不會自動調整建議落貨數量。</strong>
+        </p>
+        <div id="storeDiscountLogList" style="font-size:0.78rem;margin-bottom:10px;"></div>
+        <div style="margin-bottom:8px;">
+          <label>日期</label>
+          <input type="date" id="sdlDate">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>集團</label>
+          <select id="sdlChain">
+            <option value="全部">全部</option>
+            <option value="惠康">惠康</option>
+            <option value="百佳">百佳</option>
+            <option value="一田">一田</option>
+            <option value="Aeon">Aeon</option>
+            <option value="Donki">Donki</option>
+            <option value="佳寶">佳寶</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>折扣</label>
+          <input type="text" id="sdlLabel" placeholder="例如：全店88折 / 全店8折" maxlength="40">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>備註（可選）</label>
+          <input type="text" id="sdlNote" placeholder="可留空" maxlength="80">
+        </div>
+        <button class="btn btn-primary" onclick="addStoreDiscountLog()">加入記錄</button>
+      </div>
+          </div>
+
     <div id="page-settings" class="hidden">
       <div class="card">
         <div class="card-title">資料管理</div>
@@ -538,21 +610,6 @@
         <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
         <button class="btn" style="background:#dc3545; color:white;" onclick="confirmClearAll()">清除所有資料（含同步設定）</button>
         <p style="font-size:0.75rem;color:var(--muted);margin-top:6px;">會清空：歷史記錄、店舖清單、預計轉價、到期日、草稿、同步設定。方便其他地區重新開始。</p>
-      </div>
-      <div class="card" id="expiryCard">
-        <div class="card-title">📅 出貨到期日（每日每產品輸入一次）</div>
-        <div id="expirySavedList" style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;line-height:1.6;"></div>
-        <div style="margin-bottom:10px;">
-          <label id="expiryDateLabel">適用日期（新輸入）</label>
-          <input type="date" id="expiryDatePicker" onchange="onExpiryDatePickerChange()">
-        </div>
-        <div id="expiryEditBar" class="hidden" style="margin-bottom:8px;">
-          <span id="expiryEditLabel" style="font-size:0.85rem;color:var(--primary);font-weight:600;"></span>
-          <button type="button" class="btn btn-secondary" style="margin-top:6px;padding:8px;" onclick="cancelExpiryEdit()">取消編輯</button>
-        </div>
-        <div id="expiryInputs"></div>
-        <button type="button" class="btn btn-primary hidden" id="btnConfirmExpiry" style="margin-top:10px;" onclick="confirmExpirySave()">確定</button>
-        <div id="expiryHint" style="font-size:0.8rem;color:var(--muted);margin-top:6px;"></div>
       </div>
       <div class="card">
         <div class="card-title">🗺️ 地區管理</div>
@@ -608,60 +665,6 @@
           </div>
           <button type="button" class="btn btn-primary" onclick="addStoreWithPwd()">新增店舖</button>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-title">📅 預計轉價（按集團）</div>
-        <div style="margin-bottom:10px;">
-          <label>生效日期</label>
-          <input type="date" id="scheduleEffectiveDate">
-        </div>
-        <div style="margin-bottom:10px;">
-          <label>集團</label>
-          <select id="scheduleChain" onchange="loadScheduleForm()">
-            <option value="" selected></option>
-            <option value="惠康">惠康</option>
-            <option value="百佳">百佳</option>
-            <option value="一田">一田</option>
-            <option value="Aeon">Aeon</option>
-            <option value="Donki">Donki</option>
-            <option value="佳寶">佳寶</option>
-          </select>
-        </div>
-        <div id="schedulePrices"></div>
-        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
-        <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
-      </div>
-      <div class="card" id="storeDiscountLogCard">
-        <div class="card-title">🏷 全店折扣記錄（參考用）</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
-          記錄全店折扣日（例如全店 88 折）。下次到店時，若該段銷量期間包含折扣，銷量旁將顯示 🏷 標記。<strong>此記錄不會自動調整建議落貨數量。</strong>
-        </p>
-        <div id="storeDiscountLogList" style="font-size:0.78rem;margin-bottom:10px;"></div>
-        <div style="margin-bottom:8px;">
-          <label>日期</label>
-          <input type="date" id="sdlDate">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>集團</label>
-          <select id="sdlChain">
-            <option value="全部">全部</option>
-            <option value="惠康">惠康</option>
-            <option value="百佳">百佳</option>
-            <option value="一田">一田</option>
-            <option value="Aeon">Aeon</option>
-            <option value="Donki">Donki</option>
-            <option value="佳寶">佳寶</option>
-          </select>
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>折扣</label>
-          <input type="text" id="sdlLabel" placeholder="例如：全店88折 / 全店8折" maxlength="40">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>備註（可選）</label>
-          <input type="text" id="sdlNote" placeholder="可留空" maxlength="80">
-        </div>
-        <button class="btn btn-primary" onclick="addStoreDiscountLog()">加入記錄</button>
       </div>
       <div class="card">
         <div class="card-title">通知</div>
@@ -751,6 +754,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     <button id="nav-history" onclick="showPage('history')">
       <span class="icon">📋</span>
       <span>歷史</span>
+    </button>
+    <button id="nav-tools" onclick="showPage('tools')">
+      <span class="icon">📅</span>
+      <span>業務</span>
     </button>
     <button id="nav-settings" onclick="showPage('settings')">
       <span class="icon">⚙️</span>
@@ -5059,26 +5066,31 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
 
     // ========== 頁面切換 ==========
     function showPage(page) {
-      ['today', 'history', 'settings'].forEach(p => {
-        $(`page-${p}`).classList.toggle('hidden', p !== page);
-        $(`nav-${p}`).classList.toggle('active', p === page);
+      ['today', 'history', 'tools', 'settings'].forEach(p => {
+        const pg = $('page-' + p);
+        const nv = $('nav-' + p);
+        if (pg) pg.classList.toggle('hidden', p !== page);
+        if (nv) nv.classList.toggle('active', p === page);
       });
       if (page === 'history') {
         renderHistory();
       }
+      if (page === 'tools') {
+        loadScheduleForm();
+        _expiryEditMode = false;
+        if ($('expiryDatePicker')) { $('expiryDatePicker').disabled = false; $('expiryDatePicker').value = ''; }
+        if ($('expiryEditBar')) $('expiryEditBar').classList.add('hidden');
+        if ($('expiryInputs')) $('expiryInputs').innerHTML = '';
+        if ($('expiryHint')) $('expiryHint').textContent = '';
+        if ($('expiryDateLabel')) $('expiryDateLabel').textContent = '適用日期（新輸入）';
+        if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
+        if (typeof renderScheduleSummary === 'function') renderScheduleSummary();
+        if (typeof renderStoreDiscountLogList === 'function') renderStoreDiscountLogList();
+      }
       if (page === 'settings') {
-      if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
-      if (typeof renderStoreManageList === 'function') renderStoreManageList();
-      loadScheduleForm();
-      _expiryEditMode = false;
-      if ($('expiryDatePicker')) { $('expiryDatePicker').disabled = false; $('expiryDatePicker').value = ''; }
-      if ($('expiryEditBar')) $('expiryEditBar').classList.add('hidden');
-      if ($('expiryInputs')) $('expiryInputs').innerHTML = '';
-      if ($('expiryHint')) $('expiryHint').textContent = '';
-      if ($('expiryDateLabel')) $('expiryDateLabel').textContent = '適用日期（新輸入）';
-      if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
-      if (typeof renderStoreDiscountLogList === 'function') renderStoreDiscountLogList();
-    }
+        if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+        if (typeof renderStoreManageList === 'function') renderStoreManageList();
+      }
     }
 
 
