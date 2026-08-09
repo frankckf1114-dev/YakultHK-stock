@@ -1069,13 +1069,60 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
           '<div><strong>' + s.name + '</strong><span style="color:var(--muted);font-size:0.75rem;">　車期 ' + (days || '—') + '</span></div>' +
-          '<div style="display:flex;gap:4px;">' +
-          '<button type="button" class="btn btn-secondary" style="padding:4px 8px;font-size:0.75rem;width:auto;" onclick="editStoreProducts(\'' + s.id + '\')">產品</button>' +
-          '<button type="button" class="btn" style="background:#dc3545;color:#fff;padding:4px 10px;font-size:0.75rem;width:auto;" onclick="deleteStoreWithPwd(\'' + s.id + '\')">刪除</button>' +
+          '<div style="display:flex;gap:4px;flex-shrink:0;">' +
+          '<button type="button" class="btn btn-secondary" style="padding:4px 8px;font-size:0.72rem;width:auto;" onclick="editStoreVisitDays(\'' + s.id + '\')">車期</button>' +
+          '<button type="button" class="btn btn-secondary" style="padding:4px 8px;font-size:0.72rem;width:auto;" onclick="editStoreProducts(\'' + s.id + '\')">產品</button>' +
+          '<button type="button" class="btn" style="background:#dc3545;color:#fff;padding:4px 8px;font-size:0.72rem;width:auto;" onclick="deleteStoreWithPwd(\'' + s.id + '\')">刪除</button>' +
           '</div></div>' +
           '<div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">可售：' + (pNames || '—') + '</div>' +
           '</div>';
       }).join('');
+    }
+
+    function editStoreVisitDays(storeId) {
+      const st = STORES.find(s => s.id === storeId);
+      if (!st) return;
+      const current = (st.visitDays || []).filter(d => d >= 1 && d <= 6);
+      const dayOpts = [1, 2, 3, 4, 5, 6].map(d => {
+        const checked = current.indexOf(d) >= 0 ? ' checked' : '';
+        return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:0.9rem;">' +
+          '<input type="checkbox" class="storeVisitCb" value="' + d + '"' + checked + '> ' + DAY_NAMES[d] +
+          '</label>';
+      }).join('');
+      const panel = $('storeProductEditPanel');
+      if (!panel) {
+        showToast('請在設定頁操作');
+        return;
+      }
+      panel.classList.remove('hidden');
+      panel.innerHTML =
+        '<div style="font-weight:600;margin-bottom:8px;">更改車期：' + st.name + '</div>' +
+        '<div style="margin-bottom:6px;font-size:0.8rem;color:var(--muted);">可多選（一至六）</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;">' + dayOpts + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<button type="button" class="btn btn-primary" style="width:auto;flex:1;" onclick="saveStoreVisitDays(\'' + storeId + '\')">儲存車期</button>' +
+        '<button type="button" class="btn btn-secondary" style="width:auto;flex:1;" onclick="cancelStoreProductEdit()">取消</button>' +
+        '</div>';
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    function saveStoreVisitDays(storeId) {
+      const st = STORES.find(s => s.id === storeId);
+      if (!st) return;
+      const days = [];
+      document.querySelectorAll('.storeVisitCb:checked').forEach(function (cb) {
+        const d = parseInt(cb.value, 10);
+        if (d >= 1 && d <= 6) days.push(d);
+      });
+      if (!days.length) {
+        showToast('請至少選擇一個車期');
+        return;
+      }
+      days.sort(function (a, b) { return a - b; });
+      st.visitDays = days;
+      saveStoresList();
+      cancelStoreProductEdit();
+      renderStoreManageList();
+      showToast('已更新「' + st.name + '」車期');
     }
 
     function editStoreProducts(storeId) {
@@ -1100,7 +1147,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           '</div>';
         panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } else {
-        // fallback: prompt style not ideal; create temporary
         showToast('請在設定頁操作');
       }
     }
