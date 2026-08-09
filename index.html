@@ -4723,49 +4723,161 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
     }
 
     function exportJSON() {
-      const records = loadData();
-      const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+      // 完整備份：記錄 + 店舖／地區 + 轉價 + 到期日 + 折扣
+      const backup = {
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        records: loadData(),
+        stores: STORES,
+        regions: regionsData,
+        schedule: (function () {
+          try { return JSON.parse(localStorage.getItem('yakult_scheduled_prices') || '{}'); } catch (e) { return {}; }
+        })(),
+        expiry: (function () {
+          try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date') || '{}'); } catch (e) { return {}; }
+        })(),
+        storeDiscountLogs: (typeof loadStoreDiscountLogs === 'function') ? loadStoreDiscountLogs() : [],
+        deletedKeys: (typeof loadDeletedKeys === 'function') ? loadDeletedKeys() : {}
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `益力多備份_${todayStr()}.json`;
+      a.download = '益力多完整備份_' + todayStr() + '.json';
       a.click();
       URL.revokeObjectURL(url);
-      showToast('JSON 備份已下載');
+      showToast('完整備份已下載（含店舖／地區）');
     }
 
     function importJSON() {
       $('importFile').click();
     }
 
+    // 從記錄推斷店舖清單（舊版備份無 stores 時用）
+    function storesFromRecords(records) {
+      const map = {};
+      (records || []).forEach(function (r) {
+        if (!r || !r.storeId) return;
+        if (map[r.storeId]) return;
+        let chain = '其他';
+        const nm = r.storeName || '';
+        if (nm.indexOf('惠康') === 0) chain = '惠康';
+        else if (nm.indexOf('百佳') === 0) chain = '百佳';
+        else if (nm.indexOf('一田') === 0) chain = '一田';
+        else if (nm.indexOf('Aeon') === 0 || nm.indexOf('AEON') === 0) chain = 'Aeon';
+        else if (nm.indexOf('Donki') === 0 || nm.indexOf('DONKI') === 0) chain = 'Donki';
+        else if (nm.indexOf('佳寶') === 0) chain = '佳寶';
+        map[r.storeId] = ensureStoreProductIds({
+          id: r.storeId,
+          name: nm || r.storeId,
+          chain: chain,
+          visitDays: [1, 2, 3, 4, 5]
+        });
+      });
+      return Object.values(map);
+    }
+
     function handleImport(e) {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = function (ev) {
         try {
-          const data = JSON.parse(ev.target.result);
-          if (!Array.isArray(data)) throw new Error('格式錯誤');
-          const mode = confirm(
-            `將匯入 ${data.length} 筆記錄。\n\n` +
-            `按「確定」= 合併（同店同日會被新資料取代，其他保留）\n` +
-            `按「取消」= 不匯入`
-          );
-          if (!mode) return;
+          const raw = JSON.parse(ev.target.result);
+          let records = [];
+          let stores = null;
+          let regions = null;
+          let schedule = null;
+          let expiry = null;
+          let discounts = null;
+          let deletedKeys = null;
+
+          // 新格式 v2：完整物件
+          if (raw && !Array.isArray(raw) && typeof raw === 'object') {
+            records = Array.isArray(raw.records) ? raw.records : [];
+            if (Array.isArray(raw.stores)) stores = raw.stores;
+            if (raw.regions && raw.regions.regions) regions = raw.regions;
+            if (raw.schedule && typeof raw.schedule === 'object') schedule = raw.schedule;
+            if (raw.expiry && typeof raw.expiry === 'object') expiry = raw.expiry;
+            if (Array.isArray(raw.storeDiscountLogs)) discounts = raw.storeDiscountLogs;
+            if (raw.deletedKeys && typeof raw.deletedKeys === 'object') deletedKeys = raw.deletedKeys;
+          } else if (Array.isArray(raw)) {
+            // 舊格式：只有記錄陣列
+            records = raw;
+          } else {
+            throw new Error('格式錯誤');
+          }
+
+          const storeHint = stores
+            ? ('店舖 ' + stores.length + ' 間')
+            : (regions ? '含地區資料' : '無店舖資料（將從記錄推斷）');
+          if (!confirm(
+            '將匯入 ' + records.length + ' 筆記錄（' + storeHint + '）。\n\n' +
+            '確定 = 合併記錄，並還原店舖／地區（若備份有）\n' +
+            '取消 = 不匯入'
+          )) return;
+
+          // 合併記錄
           const existing = loadData();
           const map = {};
-          existing.forEach(r => { map[r.storeId + '|' + r.date] = r; });
-          data.forEach(r => {
+          existing.forEach(function (r) { map[r.storeId + '|' + r.date] = r; });
+          records.forEach(function (r) {
             if (!r.storeId || !r.date) return;
             map[r.storeId + '|' + r.date] = r;
           });
-          const merged = Object.values(map).sort((a, b) =>
-            a.date.localeCompare(b.date) || (a.storeName || '').localeCompare(b.storeName || '')
-          );
+          const merged = Object.values(map).sort(function (a, b) {
+            return a.date.localeCompare(b.date) || (a.storeName || '').localeCompare(b.storeName || '');
+          });
           saveData(merged);
-          showToast('已合併匯入，共 ' + merged.length + ' 筆');
-          renderHistory();
+
+          // 還原店舖／地區
+          if (regions && regions.regions) {
+            regionsData = regions;
+            saveRegionsData(regionsData);
+            STORES = loadStoresList();
+          } else if (stores && stores.length) {
+            STORES = stores.map(function (s) { return ensureStoreProductIds(Object.assign({}, s)); });
+            saveStoresList();
+          } else {
+            // 舊備份：由記錄推斷店舖，寫入目前地區
+            const inferred = storesFromRecords(merged);
+            if (inferred.length) {
+              // 與現有店合併（不刪現有）
+              const byId = {};
+              STORES.forEach(function (s) { byId[s.id] = s; });
+              inferred.forEach(function (s) {
+                if (!byId[s.id]) byId[s.id] = s;
+              });
+              STORES = Object.values(byId);
+              saveStoresList();
+            }
+          }
+
+          if (schedule) {
+            localStorage.setItem('yakult_scheduled_prices', JSON.stringify(normalizeScheduleData(schedule)));
+            localStorage.setItem('yakult_schedule_updated_at', new Date().toISOString());
+          }
+          if (expiry) {
+            localStorage.setItem('yakult_expiry_by_date', JSON.stringify(expiry));
+            localStorage.setItem('yakult_expiry_updated_at', new Date().toISOString());
+          }
+          if (discounts && typeof saveStoreDiscountLogs === 'function') {
+            saveStoreDiscountLogs(discounts);
+          }
+          if (deletedKeys && typeof saveDeletedKeys === 'function') {
+            saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), deletedKeys));
+          }
+
+          if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+          if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
+          if (typeof renderStoreManageList === 'function') renderStoreManageList();
+          if (typeof renderScheduleSummary === 'function') renderScheduleSummary();
+          if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
+          if (typeof renderHistory === 'function') renderHistory();
+
+          showToast('已匯入 ' + merged.length + ' 筆，店舖 ' + STORES.length + ' 間');
         } catch (err) {
+          console.error(err);
           showToast('匯入失敗：檔案格式不正確');
         }
       };
