@@ -1250,9 +1250,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     const DAY_NAMES = ['日','一','二','三','四','五','六'];
-    // 安全存量：下次到店時希望仍有的數量
+    // 是否以「支」為單位（Joie、Y1000）；其餘以「排」
+    function isBottleUnit(prodId) {
+      return prodId === 'y1000' || (prodId && String(prodId).indexOf('joie_') === 0);
+    }
+    // 安全存量：下次到店時希望仍有的數量（排或支）
     function getMinBuffer(prodId) {
-      return prodId === '10pack' ? 10 : 20;
+      if (prodId === '10pack') return 10;
+      if (isBottleUnit(prodId)) return 5; // Joie／Y1000：支
+      return 20;
     }
 
     // 多排特價：
@@ -1290,17 +1296,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return v;
     }
 
-    // 1條：十支裝=5排；Y1000=1支；其餘（五支裝／LT／青提／Joie）=10排
+    // 建議整數單位：十支裝 1條=5排；Joie／Y1000 以 1支為單位；其餘 1條=10排
     function getStripSize(prodId) {
       if (prodId === '10pack') return 5;
-      if (prodId === 'y1000') return 1;
+      if (isBottleUnit(prodId)) return 1;
       return 10;
     }
-    // 報告用「支」
+    // 報告換算「支」：排×每排支數；Joie／Y1000 本身已是支
     function bottlesPerRow(prodId) {
+      if (isBottleUnit(prodId)) return 1;
       if (prodId === '10pack') return 10;
-      if (prodId === 'y1000') return 1;
       return 5;
+    }
+    function unitLabel(prodId) {
+      return isBottleUnit(prodId) ? '支' : '排';
+    }
+    function suggestUnitLabel(prodId) {
+      return isBottleUnit(prodId) ? '支' : '條';
     }
     // 報告欄位簡稱：五支裝Y5、十支裝Y10、LT、青提MU
     function productShortCode(prodId) {
@@ -2967,7 +2979,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
                 <span class="value" id="last-${p.id}">—</span>
               </div>
               <div style="margin-top:6px;">
-                <label>今次存貨（${p.id === 'y1000' ? '支' : '排'}）</label>
+                <label>今次存貨（${isBottleUnit(p.id) ? '支' : '排'}）</label>
                 <input type="number" class="stock-input" id="stock-${p.id}" min="0" step="1" inputmode="numeric" enterkeyhint="next" placeholder="" oninput="calcSuggest('${p.id}')">
               </div>
               <div class="info-row" style="margin-top:6px;">
@@ -2993,7 +3005,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
                 <span class="suggest" id="suggest-${p.id}">—</span>
               </div>
               <div style="margin-top:6px;">
-                <label>實際落貨（${p.id === 'y1000' ? '支' : '排'}）</label>
+                <label>實際落貨（${isBottleUnit(p.id) ? '支' : '排'}）</label>
                 <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="" oninput="checkOrderAdvice('${p.id}')">
                 <div class="order-advice" id="orderAdvice-${p.id}" style="font-size:0.8rem;margin-top:4px;color:var(--muted);"></div>
               </div>
@@ -3803,11 +3815,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         discountSalesFactor: discountSalesFactor
       };
 
-      // 建議欄只顯示條數；原因詳見 ?
+      // 建議欄：Joie／Y1000 顯示支；其餘顯示條
+      const su = suggestUnitLabel(prodId);
       if (strips === 0) {
-        suggestEl.textContent = '0條';
+        suggestEl.textContent = '0' + su;
       } else {
-        suggestEl.textContent = strips + '條';
+        suggestEl.textContent = strips + su;
       }
 
       // 若已輸入落貨，一併更新提示
@@ -3865,7 +3878,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
 
       const lines = [];
-      lines.push(`<div style="font-size:1.1rem;font-weight:700;margin-bottom:8px;">${pname} → 建議 <span style="color:var(--primary);">${sug.strips} 條</span>（${sug.packs} 排）</div>`);
+      const detailUnit = isBottleUnit(prodId) ? '支' : '條';
+      const packUnit = isBottleUnit(prodId) ? '支' : '排';
+      lines.push(`<div style="font-size:1.1rem;font-weight:700;margin-bottom:8px;">${pname} → 建議 <span style="color:var(--primary);">${sug.strips} ${detailUnit}</span>（${sug.packs} ${packUnit}）</div>`);
 
       lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
       lines.push('<div style="font-weight:600;margin-bottom:6px;">① 基本數字</div>');
@@ -3922,8 +3937,13 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
       lines.push('<div style="font-weight:600;margin-bottom:6px;">⑤ 公式</div>');
       lines.push(`<div>需要量 ≈ 預計到下次銷量 + 安全庫存 = <strong>${Math.round((sug.expectedUntilNext || 0) + (sug.minBuf || 0))}</strong></div>`);
-      lines.push(`<div>建議排數 = 需要量 − 今次存貨 → 再四捨五入成整條（${unit} 排/條）</div>`);
-      lines.push(`<div>結果：<strong>${sug.strips} 條</strong></div>`);
+      if (isBottleUnit(prodId)) {
+        lines.push(`<div>建議支數 = 需要量 − 今次存貨 → 四捨五入成整支</div>`);
+        lines.push(`<div>結果：<strong>${sug.strips} 支</strong></div>`);
+      } else {
+        lines.push(`<div>建議排數 = 需要量 − 今次存貨 → 再四捨五入成整條（${unit} 排/條）</div>`);
+        lines.push(`<div>結果：<strong>${sug.strips} 條</strong></div>`);
+      }
       lines.push('</div>');
 
       lines.push('<div style="font-size:0.8rem;color:var(--muted);">此建議綜合：車期、同價銷量、平日／周末、安全庫存、到期日、轉價風險。最終請以現場情況為準。</div>');
