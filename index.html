@@ -457,6 +457,7 @@
           <label>日期</label>
           <input type="date" id="recordDate">
         </div>
+        <div id="recordSyncStatus" style="font-size:0.78rem;color:var(--muted);margin-top:8px;line-height:1.4;"></div>
       </div>
 
       <div id="productsArea" class="hidden">
@@ -507,6 +508,10 @@
         </div>
       </div>
       <div id="historyList" class="card"></div>
+      <div class="card">
+        <div class="card-title">最近刪除（24 小時內可復原）</div>
+        <div id="trashList" style="font-size:0.85rem;"></div>
+      </div>
     </div>
 
     <!-- 設定頁 -->
@@ -1795,15 +1800,43 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
     }
     function updateSyncStatusText() {
-      const el = $('syncStatus');
-      if (!el) return;
       const s = getSyncSettings();
-      if (!s.enabled) { el.textContent = '同步：關閉'; return; }
-      if (!isSyncConfigured()) { el.textContent = '同步：未完成設定'; return; }
-      const last = localStorage.getItem('yakult_sync_last');
+      const last = localStorage.getItem('yakult_sync_last') || '';
       const ok = localStorage.getItem('yakult_sync_last_ok');
-      const flag = ok === '0' ? '（上次失敗）' : (ok === '1' ? '（上次成功）' : '');
-      el.textContent = '同步：開啟 · 碼 ' + s.team + (last ? ' · 上次 ' + last : '') + flag;
+      const pending = localStorage.getItem('yakult_sync_pending') === '1';
+
+      // 設定頁詳細狀態
+      const el = $('syncStatus');
+      if (el) {
+        if (!s.enabled) el.textContent = '同步：關閉';
+        else if (!isSyncConfigured()) el.textContent = '同步：未完成設定';
+        else {
+          const flag = ok === '0' ? '（上次失敗）' : (ok === '1' ? '（上次成功）' : '');
+          const pend = pending ? ' · 待同步' : '';
+          el.textContent = '同步：開啟 · 碼 ' + s.team + (last ? ' · 上次 ' + last : '') + flag + pend;
+        }
+      }
+
+      // 記錄頁小字
+      const bar = $('recordSyncStatus');
+      if (bar) {
+        if (!s.enabled || !isSyncConfigured()) {
+          bar.style.color = 'var(--muted)';
+          bar.textContent = '雲端同步：關閉';
+        } else if (pending) {
+          bar.style.color = '#e65100';
+          bar.textContent = '雲端同步：待同步…';
+        } else if (ok === '0') {
+          bar.style.color = '#c62828';
+          bar.textContent = '雲端同步：失敗' + (last ? '（' + last + '）' : '') + ' · 請到設定檢查';
+        } else if (ok === '1') {
+          bar.style.color = '#2e7d32';
+          bar.textContent = '雲端同步：已同步' + (last ? ' · ' + last : '');
+        } else {
+          bar.style.color = 'var(--muted)';
+          bar.textContent = '雲端同步：開啟（尚未同步）';
+        }
+      }
     }
 
     let _syncTimer = null;
@@ -1811,6 +1844,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     let _lastRemoteStamp = '';
 
     function queueCloudPush() {
+      try { localStorage.setItem('yakult_sync_pending', '1'); } catch (e) {}
+      updateSyncStatusText();
       if (_syncTimer) clearTimeout(_syncTimer);
       // 儲存後稍等合併，再「上傳為主」同步
       _syncTimer = setTimeout(() => { syncNow(false, false, true); }, 400);
@@ -2196,6 +2231,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           String(now.getMinutes()).padStart(2,'0');
         localStorage.setItem('yakult_sync_last', label);
         localStorage.setItem('yakult_sync_last_ok', '1');
+        try { localStorage.setItem('yakult_sync_pending', '0'); } catch (e2) {}
         updateSyncStatusText();
         if (pullOnly && remoteNewer && loadData().length > countBefore) {
           showToast('已收到同事的最新記錄');
@@ -2205,6 +2241,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         console.error(e);
         const msg = (e && e.message) ? e.message : String(e);
         localStorage.setItem('yakult_sync_last_ok', '0');
+        try { localStorage.setItem('yakult_sync_pending', '0'); } catch (e2) {}
+        updateSyncStatusText();
         if (status) status.textContent = '同步失敗：' + msg;
         // 背景上傳失敗也提示一次，避免以為已上雲
         if (showMsg || preferPush) showToast('同步失敗（見設定頁）');
@@ -4226,14 +4264,92 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       showToast('已載入記錄，可修改後再儲存');
     }
 
+    // ========== 最近刪除（本機 24 小時可復原）==========
+    function loadTrash() {
+      try {
+        const raw = localStorage.getItem('yakult_trash');
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) { return []; }
+    }
+    function saveTrash(arr) {
+      localStorage.setItem('yakult_trash', JSON.stringify(arr || []));
+    }
+    function pruneTrash() {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const kept = loadTrash().filter(function (item) {
+        const t = item && item.deletedAt ? new Date(item.deletedAt).getTime() : 0;
+        return t >= cutoff;
+      });
+      saveTrash(kept);
+      return kept;
+    }
+    function addToTrash(record) {
+      if (!record || !record.storeId || !record.date) return;
+      const list = pruneTrash().filter(function (item) {
+        return !(item.record && item.record.storeId === record.storeId && item.record.date === record.date);
+      });
+      list.unshift({ deletedAt: new Date().toISOString(), record: record });
+      saveTrash(list);
+    }
+    function restoreFromTrash(storeId, date) {
+      const list = pruneTrash();
+      const idx = list.findIndex(function (item) {
+        return item.record && item.record.storeId === storeId && item.record.date === date;
+      });
+      if (idx < 0) {
+        showToast('找不到可復原的記錄（可能已過 24 小時）');
+        renderTrashList();
+        return;
+      }
+      const rec = list[idx].record;
+      list.splice(idx, 1);
+      saveTrash(list);
+      if (typeof clearDeletedKey === 'function') clearDeletedKey(storeId, date);
+      const records = loadData().filter(function (r) {
+        return !(r.storeId === storeId && r.date === date);
+      });
+      records.push(rec);
+      saveData(records);
+      renderHistory();
+      renderTrashList();
+      showToast('已復原 ' + (rec.storeName || storeId) + ' ' + date);
+      if (typeof syncNow === 'function') {
+        try { syncNow(false, false, true); } catch (e) {}
+      }
+    }
+    function renderTrashList() {
+      const box = $('trashList');
+      if (!box) return;
+      const list = pruneTrash();
+      if (!list.length) {
+        box.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;">最近 24 小時內沒有已刪除記錄</div>';
+        return;
+      }
+      box.innerHTML = list.map(function (item) {
+        const r = item.record || {};
+        const delAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const remain = delAt ? Math.max(0, 24 - Math.floor((Date.now() - delAt.getTime()) / 3600000)) : 0;
+        const name = r.storeName || r.storeId || '';
+        const date = r.date || '';
+        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+          '<div style="font-size:0.85rem;"><strong>' + name + '</strong>　' + date +
+          '<div style="font-size:0.75rem;color:var(--muted);">約 ' + remain + ' 小時內可復原</div></div>' +
+          '<button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.8rem;" onclick="restoreFromTrash(\'' +
+          String(r.storeId).replace(/'/g, '') + '\',\'' + String(date).replace(/'/g, '') + '\')">復原</button></div>';
+      }).join('');
+    }
+
     function deleteRecord(storeId, date) {
-      if (!confirm('確定刪除 ' + date + ' 的記錄？')) return;
+      if (!confirm('確定刪除 ' + date + ' 的記錄？\n（本機可於 24 小時內復原）')) return;
+      const rec = loadData().find(function (r) { return r.storeId === storeId && r.date === date; });
+      if (rec) addToTrash(rec);
       markRecordDeleted(storeId, date);
       let records = loadData().filter(r => !(r.storeId === storeId && r.date === date));
       saveData(records);
       renderHistory();
-      showToast('已刪除，正在同步雲端…');
-      // 優先上傳，避免 5 秒輪詢把舊記錄拉返嚟
+      renderTrashList();
+      showToast('已刪除（24 小時內可於歷史頁復原）');
       if (typeof syncNow === 'function') {
         try { syncNow(false, false, true); } catch (e) {}
       }
@@ -5049,6 +5165,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         // 歷史與刪除標記
         localStorage.removeItem('yakult_records');
         localStorage.removeItem('yakult_deleted_keys');
+        localStorage.removeItem('yakult_trash');
         // 店舖
         localStorage.removeItem('yakult_stores');
         localStorage.removeItem('yakult_stores_updated_at');
@@ -5105,8 +5222,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (pg) pg.classList.toggle('hidden', p !== page);
         if (nv) nv.classList.toggle('active', p === page);
       });
+      if (page === 'today') {
+        if (typeof updateSyncStatusText === 'function') updateSyncStatusText();
+      }
       if (page === 'history') {
         renderHistory();
+        if (typeof renderTrashList === 'function') renderTrashList();
       }
       if (page === 'tools') {
         loadScheduleForm();
