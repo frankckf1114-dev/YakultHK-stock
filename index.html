@@ -572,13 +572,15 @@
     <!-- 地圖看行程 -->
     <div id="mapRouteModal" class="hidden" style="position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.45);display:none;flex-direction:column;">
       <div style="background:#fff;margin:auto 0 0;border-radius:16px 16px 0 0;max-height:94vh;display:flex;flex-direction:column;width:100%;">
-        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;gap:8px;">
-          <div style="font-weight:700;color:var(--primary);font-size:0.95rem;flex:1;" id="mapRouteTitle">地圖行程</div>
-          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.8rem;background:#1565c0;" onclick="recenterMyLocation()">📍 我的位置</button>
-          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:0.85rem;" onclick="closeRouteMapView()">關閉</button>
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;gap:6px;flex-wrap:wrap;">
+          <div style="font-weight:700;color:var(--primary);font-size:0.95rem;flex:1;min-width:100px;" id="mapRouteTitle">地圖行程</div>
+          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#E60012;" onclick="navToNextStop()">下一站導航</button>
+          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#1565c0;" onclick="recenterMyLocation()">📍 我</button>
+          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="closeRouteMapView()">關閉</button>
         </div>
         <div id="mapRouteHint" style="padding:6px 14px;font-size:0.78rem;color:var(--muted);"></div>
-        <div id="mapRouteCanvas" style="height:55vh;min-height:280px;width:100%;"></div>
+        <div id="mapRouteNext" style="padding:0 14px 6px;font-size:0.88rem;font-weight:600;color:var(--primary);"></div>
+        <div id="mapRouteCanvas" style="height:50vh;min-height:260px;width:100%;"></div>
         <div id="mapRouteLegend" style="padding:10px 14px;max-height:22vh;overflow-y:auto;font-size:0.8rem;border-top:1px solid #eee;"></div>
       </div>
     </div>
@@ -5559,6 +5561,73 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       showToast('已設定「' + name + '」位置');
     }
 
+    let _mapRoutePoints = []; // [{i,name,lat,lng}]
+    let _mapNextIdx = 0; // index in _mapRoutePoints
+
+    function openNavTo(lat, lng, name) {
+      if (lat == null || lng == null) {
+        showToast('此戶口未設定位置');
+        return;
+      }
+      const dest = Number(lat).toFixed(6) + ',' + Number(lng).toFixed(6);
+      const label = encodeURIComponent(name || '目的地');
+      // Google Maps 導航（iOS/Android 多數可打開 App）
+      const url = 'https://www.google.com/maps/dir/?api=1&destination=' + dest + '&destination_place_id=&travelmode=driving';
+      // 同時提供 geo: 後備
+      try {
+        window.open(url, '_blank');
+      } catch (e) {
+        location.href = url;
+      }
+      showToast('開啟導航：' + (name || dest));
+    }
+
+    function updateNextStopUI() {
+      const el = $('mapRouteNext');
+      if (!el) return;
+      if (!_mapRoutePoints.length) {
+        el.textContent = '';
+        return;
+      }
+      if (_mapNextIdx >= _mapRoutePoints.length) {
+        el.textContent = '今日行程已完成';
+        return;
+      }
+      const p = _mapRoutePoints[_mapNextIdx];
+      el.innerHTML = '下一站：<span style="color:#E60012;">' + p.i + '. ' + String(p.name).replace(/</g, '&lt;') + '</span>';
+      // 高亮圖例
+      const legend = $('mapRouteLegend');
+      if (legend) {
+        const rows = legend.querySelectorAll('[data-nav-idx]');
+        rows.forEach(function (row) {
+          const idx = parseInt(row.getAttribute('data-nav-idx'), 10);
+          row.style.background = (idx === _mapNextIdx) ? '#fff3f3' : 'transparent';
+          row.style.fontWeight = (idx === _mapNextIdx) ? '700' : '400';
+        });
+      }
+    }
+
+    function navToNextStop() {
+      if (!_mapRoutePoints.length) {
+        showToast('沒有可導航的站點');
+        return;
+      }
+      if (_mapNextIdx >= _mapRoutePoints.length) {
+        showToast('今日行程已完成');
+        return;
+      }
+      const p = _mapRoutePoints[_mapNextIdx];
+      openNavTo(p.lat, p.lng, p.name);
+      // 導航後推進到下一站（方便連續使用）
+      if (_mapNextIdx < _mapRoutePoints.length - 1) {
+        _mapNextIdx++;
+        updateNextStopUI();
+      } else {
+        _mapNextIdx = _mapRoutePoints.length;
+        updateNextStopUI();
+      }
+    }
+
     function openRouteMapView() {
       if (typeof L === 'undefined') {
         showToast('地圖載入中，請稍後再試（需網絡）');
@@ -5581,6 +5650,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         showToast('請先為戶口按「點」設定地圖位置');
         return;
       }
+      _mapRoutePoints = points;
+      _mapNextIdx = 0;
       const modal = $('mapRouteModal');
       if (!modal) return;
       modal.style.display = 'flex';
@@ -5588,16 +5659,19 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const dayLabel = '星期' + DAY_NAMES[_routeDay];
       if ($('mapRouteTitle')) $('mapRouteTitle').textContent = dayLabel + ' · 地圖行程';
       if ($('mapRouteHint')) {
-        $('mapRouteHint').textContent = points.length + ' / ' + list.length + ' 戶已選點' +
-          (missing.length ? '　·　未選點：' + missing.slice(0, 5).join('、') + (missing.length > 5 ? '…' : '') : '') +
-          '　·　藍點為你的位置';
+        $('mapRouteHint').textContent = points.length + ' / ' + list.length + ' 戶已選點　·　點標記或清單可導航　·　藍點＝你的位置' +
+          (missing.length ? '　·　未選點 ' + missing.length + ' 戶' : '');
       }
       if ($('mapRouteLegend')) {
-        $('mapRouteLegend').innerHTML = points.map(function (p) {
-          return '<div style="padding:2px 0;"><strong style="color:var(--primary);">' + p.i + '</strong>　' +
-            String(p.name).replace(/</g, '&lt;') + '</div>';
+        $('mapRouteLegend').innerHTML = points.map(function (p, idx) {
+          return '<div data-nav-idx="' + idx + '" style="padding:6px 4px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;cursor:pointer;" ' +
+            'onclick="openNavTo(' + p.lat + ',' + p.lng + ',\'' + String(p.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\');_mapNextIdx=' + idx + ';updateNextStopUI();">' +
+            '<strong style="color:var(--primary);min-width:1.5em;">' + p.i + '</strong>' +
+            '<span style="flex:1;">' + String(p.name).replace(/</g, '&lt;') + '</span>' +
+            '<span style="color:#1565c0;font-size:0.75rem;">導航</span></div>';
         }).join('');
       }
+      updateNextStopUI();
       setTimeout(function () {
         const el = $('mapRouteCanvas');
         if (!el) return;
@@ -5612,98 +5686,33 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap'
         }).addTo(map);
-        points.forEach(function (p) {
+        points.forEach(function (p, idx) {
           const icon = L.divIcon({
             className: '',
-            html: '<div style="background:#E60012;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);">' + p.i + '</div>',
-            iconSize: [26, 26],
-            iconAnchor: [13, 13]
+            html: '<div style="background:#E60012;color:#fff;border-radius:50%;width:28px;height:28px;line-height:28px;text-align:center;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);">' + p.i + '</div>',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
           });
-          L.marker([p.lat, p.lng], { icon: icon }).addTo(map).bindPopup('<strong>' + p.i + '. ' + p.name + '</strong>');
+          const mk = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
+          const safeName = String(p.name).replace(/</g, '&lt;').replace(/'/g, '&#39;');
+          mk.bindPopup(
+            '<div style="min-width:140px;"><strong>' + p.i + '. ' + safeName + '</strong><br>' +
+            '<button type="button" style="margin-top:8px;width:100%;padding:8px;background:#E60012;color:#fff;border:none;border-radius:8px;font-size:14px;" ' +
+            'onclick="openNavTo(' + p.lat + ',' + p.lng + ',\'' + String(p.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">開始導航</button></div>'
+          );
+          mk.on('click', function () {
+            _mapNextIdx = idx;
+            updateNextStopUI();
+          });
         });
-        // 先用直線框住範圍，再換成行車路線
-        const straight = points.map(function (p) { return [p.lat, p.lng]; });
-        map.fitBounds(L.latLngBounds(straight).pad(0.15));
-        _mapRoute = { map: map, meMarker: null, meCircle: null, roadLine: null };
+        const bounds = L.latLngBounds(points.map(function (p) { return [p.lat, p.lng]; }));
+        map.fitBounds(bounds.pad(0.15));
+        _mapRoute = { map: map, meMarker: null, meCircle: null };
         setTimeout(function () {
           map.invalidateSize();
           startMyLocationWatch(false);
         }, 200);
-        // 非同步載入行車路線（沿道路，非直線）
-        if ($('mapRouteHint')) {
-          const base = $('mapRouteHint').textContent;
-          $('mapRouteHint').textContent = base + '　·　計算行車路線中…';
-        }
-        fetchDrivingRouteLatLngs(points).then(function (roadLatLngs) {
-          if (!_mapRoute || !_mapRoute.map) return;
-          if (roadLatLngs && roadLatLngs.length > 1) {
-            if (_mapRoute.roadLine) {
-              try { _mapRoute.map.removeLayer(_mapRoute.roadLine); } catch (e) {}
-            }
-            _mapRoute.roadLine = L.polyline(roadLatLngs, {
-              color: '#E60012',
-              weight: 5,
-              opacity: 0.9
-            }).addTo(_mapRoute.map);
-            try {
-              _mapRoute.map.fitBounds(_mapRoute.roadLine.getBounds().pad(0.12));
-            } catch (e) {}
-            if ($('mapRouteHint')) {
-              $('mapRouteHint').textContent = points.length + ' / ' + list.length + ' 戶已選點　·　藍點為你的位置　·　紅線為行車路線';
-            }
-          } else {
-            // 後備：直線
-            _mapRoute.roadLine = L.polyline(straight, {
-              color: '#E60012',
-              weight: 4,
-              opacity: 0.7,
-              dashArray: '8 6'
-            }).addTo(_mapRoute.map);
-            if ($('mapRouteHint')) {
-              $('mapRouteHint').textContent = points.length + ' / ' + list.length + ' 戶已選點　·　藍點為你的位置　·　行車路線暫用直線（網絡／服務異常）';
-            }
-          }
-        });
       }, 50);
-    }
-
-    // 用 OSRM 取得行車路線（沿道路）。多點時分段請求再合併。
-    async function fetchDrivingRouteLatLngs(points) {
-      if (!points || points.length < 2) return null;
-      const all = [];
-      // 每段最多約 20 個點，避免公開服務限制
-      const chunkSize = 20;
-      for (let start = 0; start < points.length - 1; start += chunkSize - 1) {
-        const chunk = points.slice(start, Math.min(start + chunkSize, points.length));
-        if (chunk.length < 2) break;
-        const coordStr = chunk.map(function (p) {
-          return p.lng.toFixed(6) + ',' + p.lat.toFixed(6);
-        }).join(';');
-        const url = 'https://router.project-osrm.org/route/v1/driving/' + coordStr +
-          '?overview=full&geometries=geojson&steps=false';
-        try {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const data = await res.json();
-          if (data.code !== 'Ok' || !data.routes || !data.routes[0] || !data.routes[0].geometry) {
-            throw new Error(data.code || 'no route');
-          }
-          const coords = data.routes[0].geometry.coordinates; // [lng, lat]
-          coords.forEach(function (c, idx) {
-            // 分段接駁時略過首點（與上段末點重疊）
-            if (start > 0 && idx === 0 && all.length) return;
-            all.push([c[1], c[0]]);
-          });
-        } catch (e) {
-          console.warn('OSRM segment failed', e);
-          // 該段失敗則用直線補上
-          for (let i = 0; i < chunk.length; i++) {
-            if (start > 0 && i === 0 && all.length) continue;
-            all.push([chunk[i].lat, chunk[i].lng]);
-          }
-        }
-      }
-      return all.length > 1 ? all : null;
     }
     function closeRouteMapView() {
       stopMyLocationWatch();
