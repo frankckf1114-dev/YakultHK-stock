@@ -444,6 +444,10 @@
     <div id="page-today">
       <div class="card">
         <div class="card-title">選擇店舖</div>
+        <div style="margin-bottom:8px;">
+          <label>店號搜尋</label>
+          <input type="text" id="storeSearch" inputmode="numeric" pattern="[0-9]*" enterkeyhint="search" placeholder="輸入店號" autocomplete="off" oninput="filterStoreSelect()">
+        </div>
         <div class="store-select-wrap">
           <select id="storeSelect" onchange="onStoreChange()">
             <option value="">-- 請選擇店舖 --</option>
@@ -605,6 +609,7 @@
           <input type="date" id="reportDateTo">
         </div>
         <button class="btn btn-primary" style="margin-bottom:10px;background:#1565c0;" onclick="exportBossPDF()">📄 匯出詳細報告（PDF）</button>
+        <div id="backupStatus" style="font-size:0.85rem;margin-bottom:10px;padding:8px 10px;border-radius:8px;background:#f5f5f5;color:var(--muted);"></div>
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="exportJSON()">匯出 JSON 備份</button>
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="importJSON()">匯入 JSON 備份</button>
         <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
@@ -1046,6 +1051,37 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         });
         if (cur && STORES.some(s => s.id === cur)) sel.value = cur;
       });
+      filterStoreSelect();
+    }
+
+    // 店號／店名簡易搜尋（數字鍵盤輸入店號）
+    function filterStoreSelect() {
+      const q = (($('storeSearch') && $('storeSearch').value) || '').trim().toLowerCase();
+      const sel = $('storeSelect');
+      if (!sel) return;
+      const cur = sel.value;
+      const list = STORES.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-HK'));
+      const matched = !q ? list : list.filter(function (s) {
+        const name = (s.name || '').toLowerCase();
+        const id = (s.id || '').toLowerCase();
+        const code = String(s.id || '').replace(/^[a-z]+/i, ''); // wc107 → 107
+        return name.indexOf(q) >= 0 || id.indexOf(q) >= 0 || code.indexOf(q) >= 0;
+      });
+      sel.innerHTML = '<option value="">-- 請選擇店舖 --</option>';
+      matched.forEach(function (s) {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        sel.appendChild(opt);
+      });
+      if (cur && matched.some(s => s.id === cur)) {
+        sel.value = cur;
+      } else if (q && matched.length === 1) {
+        sel.value = matched[0].id;
+        onStoreChange();
+      } else if (cur && !matched.some(s => s.id === cur)) {
+        // 目前選中被濾走，不強制清空已填數量；只顯示篩選結果
+      }
     }
     function renderStoreManageList() {
       const box = $('storeManageList');
@@ -3869,80 +3905,28 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
 
       if (!sug) {
-        body.innerHTML = `<div><strong>${pname}</strong></div><div style="margin-top:8px;">請先選擇店舖並填寫今次存貨，才能計算建議。</div>`;
+        body.innerHTML = `<div><strong>${pname}</strong></div><div style="margin-top:8px;">請先選擇店舖並填寫今次存貨。</div>`;
         return;
       }
 
-      const lines = [];
       const detailUnit = isBottleUnit(prodId) ? '支' : '條';
-      const packUnit = isBottleUnit(prodId) ? '支' : '排';
-      lines.push(`<div style="font-size:1.1rem;font-weight:700;margin-bottom:8px;">${pname} → 建議 <span style="color:var(--primary);">${sug.strips} ${detailUnit}</span>（${sug.packs} ${packUnit}）</div>`);
+      const lines = [];
+      // 先結論
+      lines.push(`<div style="font-size:1.15rem;font-weight:700;margin-bottom:10px;">建議落貨：<span style="color:var(--primary);">${sug.strips} ${detailUnit}</span></div>`);
+      lines.push(`<div style="font-size:0.9rem;margin-bottom:10px;">今次存貨 <strong>${sug.curStock}</strong>　·　下次 ${sug.nextHint || '—'}（約 ${sug.daysNext} 天）</div>`);
 
-      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">① 基本數字</div>');
-      lines.push(`<div>今次存貨：<strong>${sug.curStock}</strong></div>`);
-      if (sug.lastStock != null) lines.push(`<div>上次有效存貨：<strong>${sug.lastStock}</strong></div>`);
-      lines.push(`<div>最低安全庫存：<strong>${getMinBuffer(prodId)}</strong>（十支裝10／其餘20）</div>`);
-      lines.push(`<div>下次到店：<strong>${sug.nextHint || '—'}</strong>（約 ${sug.daysNext} 天後）</div>`);
-      if (sug.expNote) lines.push(`<div>備註：<strong>${sug.expNote}</strong></div>`);
-      lines.push(`<div>參考售價：<strong>${price != null ? formatPriceLabel(prodId, price) : '—'}</strong></div>`);
-      lines.push('</div>');
-
-      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">② 同價歷史銷量（本店）</div>');
-      lines.push(histHtml);
-      if (sug.dailyRate != null) {
-        lines.push(`<div style="margin-top:4px;">換算日均約 <strong>${Math.round(sug.dailyRate * 10) / 10}</strong> → 到下次約賣 <strong>${Math.round(sug.expectedUntilNext || 0)}</strong></div>`);
-      }
-      if (sug.discountSalesNote) {
-        lines.push('<div style="margin-top:8px;padding:8px;background:#fff3e0;border-radius:8px;color:#e65100;">');
-        lines.push('<div style="font-weight:700;">🏷 折扣日銷量提醒</div>');
-        lines.push('<div style="font-size:0.9rem;margin-top:4px;">' + sug.discountSalesNote + '</div>');
-        lines.push('<div style="font-size:0.85rem;margin-top:4px;color:#666;">建議落貨並非單純以「上次存貨 − 今次存貨」補回。折扣期間推高的銷量，不代表下一段會維持相同水平，系統已改以較保守的預計銷量計算。</div>');
-        lines.push('</div>');
-      }
-      lines.push('</div>');
-
-      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">③ 平日／周末</div>');
-      if (sug.dayPatternNote) {
-        lines.push(`<div>${sug.dayPatternNote}</div>`);
-        if (sug.dayProfile) {
-          const dp = sug.dayProfile;
-          if (dp.weekdayDaily != null)
-            lines.push(`<div>平日日均約 <strong>${Math.round(dp.weekdayDaily * 10) / 10}</strong></div>`);
-          if (dp.weekendDaily != null)
-            lines.push(`<div>周末日均約 <strong>${Math.round(dp.weekendDaily * 10) / 10}</strong></div>`);
-        }
-        lines.push('<div style="font-size:0.85rem;color:var(--muted);">已按下次到店前的實際平日／周末日數加權預計銷量。</div>');
-      } else {
-        lines.push('<div style="color:var(--muted);">歷史樣本不足，暫不區分平日／周末。</div>');
-      }
-      lines.push('</div>');
-
-lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新鮮度</div>');
-      if (sug.remainToday != null) {
-        lines.push(`<div>今日出貨剩餘：<strong>${sug.remainToday}</strong> 日${sug.remainToday <= 7 ? '（須報交換）' : ''}</div>`);
-        if (sug.remainNext != null) lines.push(`<div>下次到店時約剩餘：<strong>${sug.remainNext}</strong> 日</div>`);
-        lines.push(`<div>銷量係數：<strong>${Math.round((sug.freshFactor || 1) * 100)}%</strong>（愈舊愈低）</div>`);
-      } else {
-        lines.push('<div style="color:var(--muted);">未在「設定」填寫今日出貨到期日，暫按正常新鮮度計算。</div>');
-      }
-      lines.push('</div>');
-
-      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;margin-bottom:10px;">');
-      lines.push('<div style="font-weight:600;margin-bottom:6px;">⑤ 公式</div>');
-      lines.push(`<div>需要量 ≈ 預計到下次銷量 + 安全庫存 = <strong>${Math.round((sug.expectedUntilNext || 0) + (sug.minBuf || 0))}</strong></div>`);
-      if (isBottleUnit(prodId)) {
-        lines.push(`<div>建議支數 = 需要量 − 今次存貨 → 四捨五入成整支</div>`);
-        lines.push(`<div>結果：<strong>${sug.strips} 支</strong></div>`);
-      } else {
-        lines.push(`<div>建議排數 = 需要量 − 今次存貨 → 再四捨五入成整條（${unit} 排/條）</div>`);
-        lines.push(`<div>結果：<strong>${sug.strips} 條</strong></div>`);
-      }
-      lines.push('</div>');
-
-      lines.push('<div style="font-size:0.8rem;color:var(--muted);">此建議綜合：車期、同價銷量、平日／周末、安全庫存、到期日、轉價風險。最終請以現場情況為準。</div>');
+      const reasons = [];
+      if (sug.expectedUntilNext != null)
+        reasons.push('預計到下次約賣 ' + Math.round(sug.expectedUntilNext));
+      reasons.push('安全庫存 ' + (sug.minBuf != null ? sug.minBuf : getMinBuffer(prodId)));
+      if (price != null) reasons.push('參考價 ' + formatPriceLabel(prodId, price));
+      if (histCount > 0) reasons.push('同價歷史 ' + histCount + ' 次，均量約 ' + Math.round(histAvg));
+      if (sug.dayPatternNote) reasons.push(sug.dayPatternNote);
+      if (sug.expNote) reasons.push(sug.expNote);
+      if (sug.discountSalesNote) reasons.push('含折扣日銷量，已保守估算');
+      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;font-size:0.88rem;line-height:1.6;">' +
+        reasons.map(function (x) { return '· ' + x; }).join('<br>') + '</div>');
+      lines.push('<div style="font-size:0.78rem;color:var(--muted);margin-top:10px;">最終請以現場情況為準。</div>');
 
       body.innerHTML = lines.join('');
     }
@@ -4162,7 +4146,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         });
         const histProds = PRODUCTS.filter(p => idSet[p.id]);
         let hasAny = false;
-        const stocks = [], salesArr = [], orders = [], totals = [];
+        const stocks = [], salesArr = [], orders = [], totals = [], prices = [];
         histProds.forEach(p => {
           const pr = (r.products && r.products[p.id]) || {};
           const stock = pr.stock != null && pr.stock !== '' ? Number(pr.stock) : null;
@@ -4180,7 +4164,9 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           salesArr.push(sales != null ? sales : '—');
           orders.push(order != null ? order : '—');
           totals.push(total != null ? total : '—');
+          prices.push(pr.price != null ? formatPriceLabel(p.id, pr.price) : '—');
         });
+        const histKey = (r.storeId + '_' + r.date).replace(/[^a-zA-Z0-9_\-]/g, '_');
         let table = '';
         if (hasAny && histProds.length) {
           table = '<table class="hist-table"><thead><tr><th></th>' +
@@ -4190,6 +4176,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
             '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">落貨</td>' + orders.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr class="total-row"><td class="row-label">合計</td>' + totals.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '<tr id="histPriceRow_' + histKey + '" class="hidden"><td class="row-label">價錢</td>' + prices.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '</tbody></table>';
         } else {
           table = '（無詳細資料）';
@@ -4203,6 +4190,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
             '</div>' +
             '<div class="history-detail">' + table + '</div>' +
             '<div style="margin-top:8px;">' +
+              (hasAny ? '<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="toggleHistPrices(\'' + histKey + '\', this)">顯示價錢</button> ' : '') +
               '<button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="loadRecordToForm(\'' + r.storeId + '\',\'' + r.date + '\')">載入修改</button>' +
               '<button class="btn" style="padding:6px 12px; font-size:0.85rem; width:auto; background:#dc3545; color:white; margin-left:6px;" onclick="deleteRecord(\'' + r.storeId + '\',\'' + r.date + '\')">刪除</button>' +
             '</div>' +
@@ -4215,6 +4203,14 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       if ($('historyStoreFilter')) $('historyStoreFilter').value = '';
       if ($('historyDateFilter')) $('historyDateFilter').value = '';
       renderHistory();
+    }
+
+    function toggleHistPrices(histKey, btn) {
+      const row = document.getElementById('histPriceRow_' + histKey);
+      if (!row) return;
+      const show = row.classList.contains('hidden');
+      row.classList.toggle('hidden', !show);
+      if (btn) btn.textContent = show ? '隱藏價錢' : '顯示價錢';
     }
 
     function loadRecordToForm(storeId, date) {
@@ -4860,7 +4856,40 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       a.download = '益力多完整備份_' + todayStr() + '.json';
       a.click();
       URL.revokeObjectURL(url);
+      try { localStorage.setItem('yakult_last_backup_at', new Date().toISOString()); } catch (e) {}
+      updateBackupStatus();
       showToast('完整備份已下載（含店舖／地區）');
+    }
+
+    function updateBackupStatus() {
+      const el = $('backupStatus');
+      if (!el) return;
+      let iso = '';
+      try { iso = localStorage.getItem('yakult_last_backup_at') || ''; } catch (e) {}
+      if (!iso) {
+        el.style.background = '#fff3e0';
+        el.style.color = '#e65100';
+        el.textContent = '尚未匯出備份。建議定期匯出 JSON，以免資料遺失。';
+        return;
+      }
+      const t = new Date(iso);
+      if (isNaN(t.getTime())) {
+        el.textContent = '上次備份時間無效，請重新匯出。';
+        return;
+      }
+      const days = Math.floor((Date.now() - t.getTime()) / 86400000);
+      const label = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' +
+        String(t.getDate()).padStart(2, '0') + ' ' + String(t.getHours()).padStart(2, '0') + ':' +
+        String(t.getMinutes()).padStart(2, '0');
+      if (days >= 7) {
+        el.style.background = '#ffebee';
+        el.style.color = '#c62828';
+        el.textContent = '上次備份：' + label + '（已超過 ' + days + ' 日，請盡快匯出）';
+      } else {
+        el.style.background = '#e8f5e9';
+        el.style.color = '#2e7d32';
+        el.textContent = '上次備份：' + label + (days === 0 ? '（今天）' : '（' + days + ' 日前）');
+      }
     }
 
     function importJSON() {
@@ -5090,6 +5119,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       if (page === 'settings') {
         if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
         if (typeof renderStoreManageList === 'function') renderStoreManageList();
+        if (typeof updateBackupStatus === 'function') updateBackupStatus();
       }
     }
 
@@ -5137,7 +5167,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
 
     // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=9').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js?v=10').then(function (reg) {
         // 每次打開檢查更新，唔使清網站資料
         try { reg.update(); } catch (e) {}
         if (reg.waiting) {

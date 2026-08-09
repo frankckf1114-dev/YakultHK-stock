@@ -1,12 +1,13 @@
-// stock-v7：網絡優先，更新 App 唔使清網站資料（localStorage 保留）
-const CACHE = 'stock-v7';
+// stock-v10：網絡優先，更新 App 唔使清網站資料（localStorage 保留）
+const CACHE = 'stock-v10';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  './icon-180.png'
+  './icon-180.png',
+  './yakult_logo.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -24,7 +25,6 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// 網絡優先：有網先取最新，失敗才用快取（離線仍可用）
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
