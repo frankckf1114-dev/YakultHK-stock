@@ -4155,7 +4155,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         });
         const histProds = PRODUCTS.filter(p => idSet[p.id]);
         let hasAny = false;
-        const stocks = [], salesArr = [], orders = [], totals = [], priceMap = {};
+        const stocks = [], salesArr = [], orders = [], totals = [];
         histProds.forEach(p => {
           const pr = (r.products && r.products[p.id]) || {};
           const stock = pr.stock != null && pr.stock !== '' ? Number(pr.stock) : null;
@@ -4173,24 +4173,13 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           salesArr.push(sales != null ? sales : '—');
           orders.push(order != null ? order : '—');
           totals.push(total != null ? total : '—');
-          priceMap[p.id] = pr.price != null ? formatPriceLabel(p.id, pr.price) : '—';
         });
         let table = '';
         if (hasAny && histProds.length) {
-          const salesCells = histProds.map((p, i) => {
-            const v = salesArr[i];
-            const priceLabel = priceMap[p.id] || '—';
-            // 點銷量顯示價錢
-            return '<td class="hist-sales-cell" style="color:var(--primary);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" ' +
-              'onclick="event.stopPropagation();showHistPricePopup(this,\'' +
-              String(productShortCode(p.id)).replace(/'/g, '') + '\',\'' +
-              String(priceLabel).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')" ' +
-              'title="點擊查看價錢">' + v + '</td>';
-          }).join('');
           table = '<table class="hist-table"><thead><tr><th></th>' +
             histProds.map(p => '<th>' + productShortCode(p.id) + '</th>').join('') +
             '</tr></thead><tbody>' +
-            '<tr><td class="row-label">銷量</td>' + salesCells + '</tr>' +
+            '<tr><td class="row-label">銷量</td>' + salesArr.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">落貨</td>' + orders.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr class="total-row"><td class="row-label">合計</td>' + totals.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
@@ -4220,35 +4209,6 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       if ($('historyDateFilter')) $('historyDateFilter').value = '';
       renderHistory();
     }
-
-    // 歷史：點銷量 → 小視窗顯示價錢
-    function showHistPricePopup(el, shortCode, priceLabel) {
-      let tip = document.getElementById('histPriceTip');
-      if (!tip) {
-        tip = document.createElement('div');
-        tip.id = 'histPriceTip';
-        tip.style.cssText = 'position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:10px;' +
-          'box-shadow:0 6px 20px rgba(0,0,0,0.15);padding:10px 14px;font-size:0.9rem;max-width:80vw;';
-        document.body.appendChild(tip);
-      }
-      tip.innerHTML = '<div style="font-weight:700;color:var(--primary);margin-bottom:4px;">' + shortCode + '</div>' +
-        '<div>價錢：<strong>' + priceLabel + '</strong></div>' +
-        '<div style="margin-top:8px;text-align:right;"><button type="button" class="btn btn-secondary" style="width:auto;padding:4px 12px;font-size:0.8rem;" onclick="hideHistPriceTip()">關閉</button></div>';
-      tip.style.display = 'block';
-      const rect = el.getBoundingClientRect();
-      let top = rect.bottom + 8;
-      let left = rect.left + rect.width / 2 - 70;
-      if (left < 8) left = 8;
-      if (left + 160 > window.innerWidth - 8) left = window.innerWidth - 168;
-      if (top + 100 > window.innerHeight - 8) top = rect.top - 100;
-      tip.style.top = top + 'px';
-      tip.style.left = left + 'px';
-    }
-    function hideHistPriceTip() {
-      const tip = document.getElementById('histPriceTip');
-      if (tip) tip.style.display = 'none';
-    }
-    document.addEventListener('click', function () { hideHistPriceTip(); });
 
     function loadRecordToForm(storeId, date) {
       $('storeSelect').value = storeId;
