@@ -387,7 +387,7 @@
       </svg>
       <div>
         <h1>存貨管理</h1>
-        <div class="subtitle">Yakult · 每日落貨記錄 <span style="color:#bbb;font-weight:500;font-size:0.85em;">· STH</span></div>
+        <div class="subtitle">Yakult · 每日落貨記錄</div>
       </div>
     </div>
     <div class="tagline">人も地球も健康に · 代田株のチカラ</div>
@@ -500,7 +500,8 @@
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="exportJSON()">匯出 JSON 備份</button>
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="importJSON()">匯入 JSON 備份</button>
         <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
-        <button class="btn" style="background:#dc3545; color:white;" onclick="confirmClearAll()">清除所有資料</button>
+        <button class="btn" style="background:#dc3545; color:white;" onclick="confirmClearAll()">清除所有資料（含同步設定）</button>
+        <p style="font-size:0.75rem;color:var(--muted);margin-top:6px;">會清空：歷史記錄、店舖清單、預計轉價、到期日、草稿、同步設定。方便其他地區重新開始。</p>
       </div>
       <div class="card" id="expiryCard">
         <div class="card-title">📅 出貨到期日（每日每產品輸入一次）</div>
@@ -518,8 +519,22 @@
         <div id="expiryHint" style="font-size:0.8rem;color:var(--muted);margin-top:6px;"></div>
       </div>
       <div class="card">
-        <div class="card-title">🏪 店舖管理</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">可自由新增店舖及設定產品；刪除店舖時會再確認一次。</p>
+        <div class="card-title">🗺️ 地區管理</div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">可儲存多個地區的店舖清單，隨時切換。切換前會自動儲存目前地區的店舖。</p>
+        <div style="margin-bottom:10px;">
+          <label>目前地區</label>
+          <select id="regionSelect" onchange="onRegionSelectChange()"></select>
+        </div>
+        <div id="regionCurrentLabel" style="font-size:0.85rem;color:var(--primary);font-weight:600;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <button type="button" class="btn btn-primary" style="width:auto;flex:1;" onclick="addNewRegion()">新增地區</button>
+          <button type="button" class="btn btn-secondary" style="width:auto;flex:1;" onclick="renameCurrentRegion()">重新命名</button>
+          <button type="button" class="btn" style="width:auto;flex:1;background:#dc3545;color:#fff;" onclick="deleteCurrentRegion()">刪除地區</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🏪 店舖管理 <span id="storeRegionTag" style="font-weight:400;font-size:0.8rem;color:var(--muted);"></span></div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">以下店舖屬於<strong>目前地區</strong>。新增／刪除只影響此地區。</p>
         <div id="storeManageList" style="font-size:0.82rem;margin-bottom:12px;max-height:260px;overflow-y:auto;"></div>
         <div id="storeProductEditPanel" class="hidden" style="background:#fafafa;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;"></div>
         <div style="border-top:1px solid var(--border);padding-top:10px;">
@@ -772,53 +787,191 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return store;
     }
 
-    // visitDays: 0=日,1=一,2=二,3=三,4=四,5=五,6=六
-    // 預設店舖；使用者可在設定新增／刪除（需密碼）
-    const DEFAULT_STORES = [
-      { id: 'wc107', name: '惠康 107 新墟', chain: '惠康', visitDays: [1,4] },
-      { id: 'wc166', name: '惠康 166 翠珊閣', chain: '惠康', visitDays: [2,4] },
-      { id: 'wc181', name: '惠康 181 建生', chain: '惠康', visitDays: [2,5] },
-      { id: 'wc213', name: '惠康 213 置樂', chain: '惠康', visitDays: [1,4] },
-      { id: 'wc424', name: '惠康 424 良景', chain: '惠康', visitDays: [2,5] },
-      { id: 'wc428', name: '惠康 428 雅珊閣', chain: '惠康', visitDays: [2,4] },
-      { id: 'wc442', name: '惠康 442 仁政', chain: '惠康', visitDays: [1,3,5] },
-      { id: 'wc515', name: '惠康 515 藍地', chain: '惠康', visitDays: [1,3] },
-      { id: 'wc586', name: '惠康 586 屯門時代廣場 2', chain: '惠康', visitDays: [1,3,5] },
-      { id: 'wc587', name: '惠康 587 菁田', chain: '惠康', visitDays: [2,4,6] },
-      { id: 'pk098', name: '百佳 098 屯門中心', chain: '百佳', visitDays: [1,4] },
-      { id: 'pk123', name: '百佳 123 兆康', chain: '百佳', visitDays: [2,5] },
-      { id: 'pk181', name: '百佳 181 和田', chain: '百佳', visitDays: [2,5] },
-      { id: 'pk646', name: '百佳 646 欣田', chain: '百佳', visitDays: [2,4,6] },
-      { id: 'pk665', name: '百佳 665 富泰', chain: '百佳', visitDays: [1,4] },
-      { id: 'pk692', name: '百佳 692 屯門市廣場 2', chain: '百佳', visitDays: [1,3,5] },
-      { id: 'pk695', name: '百佳 695 寶田', chain: '百佳', visitDays: [2,5] },
-      { id: 'yt015', name: '一田 015 Novowalk', chain: '一田', visitDays: [1,3,5] },
-      { id: 'dk008', name: 'Donki 008 屯門', chain: 'Donki', visitDays: [1,3,5] },
-      { id: 'ae009', name: 'Aeon 009 屯門', chain: 'Aeon', visitDays: [1,3,5] },
-      { id: 'kb076', name: '佳寶 076 海麗', chain: '佳寶', visitDays: [2,5] },
-      { id: 'kb106', name: '佳寶 106 置樂', chain: '佳寶', visitDays: [1,4] },
-      { id: 'kb151', name: '佳寶 151 屯門', chain: '佳寶', visitDays: [1,4] },
-      { id: 'kb214', name: '佳寶 214 仁政', chain: '佳寶', visitDays: [1,3,5] }
-    ].map(s => {
-      s.productIds = defaultProductIdsForChain(s.chain);
-      return s;
-    });
+    // 空白版：不預載店舖；以「地區」保存多套店舖清單
+    const DEFAULT_STORES = [];
+    const REGIONS_KEY = 'yakult_regions';
 
-    let STORES = loadStoresList();
-    function loadStoresList() {
+    function loadRegionsData() {
       try {
-        const raw = localStorage.getItem('yakult_stores');
+        const raw = localStorage.getItem(REGIONS_KEY);
         if (raw) {
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr) && arr.length) {
-            return arr.map(s => ensureStoreProductIds(Object.assign({}, s)));
+          const data = JSON.parse(raw);
+          if (data && data.regions && typeof data.regions === 'object') {
+            return data;
           }
         }
       } catch (e) {}
-      return DEFAULT_STORES.map(s => Object.assign({}, s, { productIds: (s.productIds || defaultProductIdsForChain(s.chain)).slice() }));
+      // 由舊版 yakult_stores 遷移成「預設地區」
+      let legacy = [];
+      try {
+        const raw = localStorage.getItem('yakult_stores');
+        if (raw !== null && raw !== undefined) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) legacy = arr;
+        }
+      } catch (e) {}
+      const id = 'region_' + Date.now();
+      return {
+        currentId: id,
+        regions: {
+          [id]: {
+            id: id,
+            name: legacy.length ? '我的地區' : '預設地區',
+            stores: legacy.map(s => ensureStoreProductIds(Object.assign({}, s))),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      };
     }
+
+    function saveRegionsData(data) {
+      localStorage.setItem(REGIONS_KEY, JSON.stringify(data));
+      localStorage.setItem('yakult_stores_updated_at', new Date().toISOString());
+    }
+
+    let regionsData = loadRegionsData();
+
+    function getCurrentRegion() {
+      if (!regionsData.currentId || !regionsData.regions[regionsData.currentId]) {
+        const ids = Object.keys(regionsData.regions);
+        if (!ids.length) {
+          const id = 'region_' + Date.now();
+          regionsData.regions[id] = { id: id, name: '預設地區', stores: [], updatedAt: new Date().toISOString() };
+          regionsData.currentId = id;
+          saveRegionsData(regionsData);
+        } else {
+          regionsData.currentId = ids[0];
+        }
+      }
+      return regionsData.regions[regionsData.currentId];
+    }
+
+    function loadStoresList() {
+      const reg = getCurrentRegion();
+      return (reg.stores || []).map(s => ensureStoreProductIds(Object.assign({}, s)));
+    }
+
     function saveStoresList() {
+      const reg = getCurrentRegion();
+      reg.stores = STORES.map(s => Object.assign({}, s));
+      reg.updatedAt = new Date().toISOString();
+      regionsData.regions[reg.id] = reg;
+      saveRegionsData(regionsData);
+      // 兼容舊 key（單區同步／備份）
       localStorage.setItem('yakult_stores', JSON.stringify(STORES));
+    }
+
+    let STORES = loadStoresList();
+
+    function refreshRegionSelect() {
+      const sel = $('regionSelect');
+      if (!sel) return;
+      const cur = regionsData.currentId;
+      sel.innerHTML = '';
+      Object.keys(regionsData.regions).forEach(function (id) {
+        const r = regionsData.regions[id];
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = (r.name || id) + '（' + ((r.stores && r.stores.length) || 0) + ' 間店）';
+        sel.appendChild(opt);
+      });
+      if (cur && regionsData.regions[cur]) sel.value = cur;
+      const label = $('regionCurrentLabel');
+      if (label) {
+        const r = getCurrentRegion();
+        label.textContent = '目前：' + (r.name || '') + '　·　' + (STORES.length) + ' 間店舖';
+      }
+      const tag = $('storeRegionTag');
+      if (tag) tag.textContent = '（' + (getCurrentRegion().name || '') + '）';
+    }
+
+    function onRegionSelectChange() {
+      const sel = $('regionSelect');
+      if (!sel || !sel.value) return;
+      if (sel.value === regionsData.currentId) return;
+      switchToRegion(sel.value);
+    }
+
+    function switchToRegion(regionId) {
+      if (!regionId || !regionsData.regions[regionId]) {
+        showToast('找不到該地區');
+        return;
+      }
+      // 先把目前 STORES 寫回目前地區
+      saveStoresList();
+      regionsData.currentId = regionId;
+      saveRegionsData(regionsData);
+      STORES = loadStoresList();
+      refreshRegionSelect();
+      refreshStoreDropdowns();
+      renderStoreManageList();
+      if ($('storeSelect')) $('storeSelect').value = '';
+      if (typeof onStoreChange === 'function') onStoreChange();
+      showToast('已切換至「' + (getCurrentRegion().name || '') + '」');
+    }
+
+    function addNewRegion() {
+      const name = prompt('新地區名稱（例如：屯門、元朗、沙田）：');
+      if (name == null) return;
+      const n = String(name).trim();
+      if (!n) {
+        showToast('請輸入地區名稱');
+        return;
+      }
+      saveStoresList(); // 保存目前地區
+      const id = 'region_' + Date.now();
+      regionsData.regions[id] = {
+        id: id,
+        name: n,
+        stores: [],
+        updatedAt: new Date().toISOString()
+      };
+      regionsData.currentId = id;
+      saveRegionsData(regionsData);
+      STORES = [];
+      refreshRegionSelect();
+      refreshStoreDropdowns();
+      renderStoreManageList();
+      if ($('storeSelect')) $('storeSelect').value = '';
+      if (typeof onStoreChange === 'function') onStoreChange();
+      showToast('已新增地區「' + n + '」，請加入店舖');
+    }
+
+    function renameCurrentRegion() {
+      const reg = getCurrentRegion();
+      const name = prompt('地區名稱：', reg.name || '');
+      if (name == null) return;
+      const n = String(name).trim();
+      if (!n) {
+        showToast('名稱不可空白');
+        return;
+      }
+      reg.name = n;
+      regionsData.regions[reg.id] = reg;
+      saveRegionsData(regionsData);
+      refreshRegionSelect();
+      showToast('已重新命名為「' + n + '」');
+    }
+
+    function deleteCurrentRegion() {
+      const ids = Object.keys(regionsData.regions);
+      if (ids.length <= 1) {
+        showToast('至少保留一個地區');
+        return;
+      }
+      const reg = getCurrentRegion();
+      if (!confirm('確定刪除地區「' + (reg.name || '') + '」？\n該區 ' + (reg.stores || []).length + ' 間店舖會一併刪除。\n（歷史記錄仍保留，但選單不再顯示這些店）')) return;
+      const delId = reg.id;
+      delete regionsData.regions[delId];
+      regionsData.currentId = Object.keys(regionsData.regions)[0];
+      saveRegionsData(regionsData);
+      STORES = loadStoresList();
+      refreshRegionSelect();
+      refreshStoreDropdowns();
+      renderStoreManageList();
+      if ($('storeSelect')) $('storeSelect').value = '';
+      if (typeof onStoreChange === 'function') onStoreChange();
+      showToast('已刪除地區');
     }
     // 店舖管理密碼（可在設定更改）；預設 STH086
     function getStoreAdminPwd() {
@@ -1479,10 +1632,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         // 去掉 URL 尾隨空白、誤貼的引號
         s.url = s.url.replace(/^["']|["']$/g, '');
         s.key = s.key.replace(/^["']|["']$/g, '').replace(/\s+/g, '');
-        if (!s.url && !s.key && !s.team) {
-          showToast('請至少填寫 URL、key、同步碼');
-          return;
-        }
+        // 允許全部留空並儲存（空白 App／關閉同步）
         if (s.enabled && (!s.team || !s.url || !s.key)) {
           showToast('開啟同步需填：同步碼、URL、key');
           return;
@@ -1491,16 +1641,24 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           showToast('URL 須以 https:// 開頭');
           return;
         }
+        // 全空時強制關閉同步
+        if (!s.url && !s.key && !s.team) {
+          s.enabled = false;
+          if ($('syncEnabled')) $('syncEnabled').value = '0';
+        }
         setSyncSettings(s);
         updateSyncStatusText();
-        // 設定本身一定先存成功
-        showToast('設定已儲存' + (s.enabled ? '，正在測試雲端…' : '（同步關閉）'));
-        if (s.enabled) {
-          startSyncPolling();
-          // 延遲測試，讓 toast 先顯示
-          setTimeout(() => syncNow(true), 400);
-        } else {
+        if (!s.url && !s.key && !s.team) {
+          showToast('已儲存空白設定（同步關閉）');
           stopSyncPolling();
+        } else {
+          showToast('設定已儲存' + (s.enabled ? '，正在測試雲端…' : '（同步關閉）'));
+          if (s.enabled) {
+            startSyncPolling();
+            setTimeout(() => syncNow(true), 400);
+          } else {
+            stopSyncPolling();
+          }
         }
       } catch (err) {
         console.error(err);
@@ -1621,6 +1779,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const s = getSyncSettings();
       return {
         records: loadData(),
+        stores: STORES,
+        regions: regionsData,
         schedule: (function(){ try { return JSON.parse(localStorage.getItem('yakult_scheduled_prices')||'{}'); } catch(e){ return {}; } })(),
         expiry: (function(){ try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date')||'{}'); } catch(e){ return {}; } })(),
         storeDiscountLogs: loadStoreDiscountLogs(),
@@ -1666,6 +1826,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           saveStoreDiscountLogs(payload.storeDiscountLogs);
           if (remoteAt) localStorage.setItem('yakult_store_discount_logs_at', remoteAt);
         }
+      }
+      // 地區／店舖：以較新時間為準
+      const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
+      const localAt = localStorage.getItem('yakult_stores_updated_at') || '';
+      if (!localAt || (remoteAt && remoteAt > localAt)) {
+        if (payload.regions && payload.regions.regions) {
+          regionsData = payload.regions;
+          saveRegionsData(regionsData);
+          STORES = loadStoresList();
+          if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+        } else if (Array.isArray(payload.stores)) {
+          STORES = payload.stores.map(s => ensureStoreProductIds(Object.assign({}, s)));
+          saveStoresList();
+        }
+        if (remoteAt) localStorage.setItem('yakult_stores_updated_at', remoteAt);
+        if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
+        if (typeof renderStoreManageList === 'function') renderStoreManageList();
       }
       return merged.length - before;
     }
@@ -2396,6 +2573,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // ========== 初始化 ==========
     function init() {
+      refreshRegionSelect();
       refreshStoreDropdowns();
       renderStoreManageList();
 
@@ -4498,15 +4676,69 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       e.target.value = '';
     }
 
+    function wipeSyncFormUI() {
+      if ($('syncEnabled')) $('syncEnabled').value = '0';
+      if ($('syncTeamCode')) { $('syncTeamCode').value = ''; $('syncTeamCode').defaultValue = ''; }
+      if ($('syncUrl')) { $('syncUrl').value = ''; $('syncUrl').defaultValue = ''; }
+      if ($('syncKey')) { $('syncKey').value = ''; $('syncKey').defaultValue = ''; }
+      if ($('syncUserName')) { $('syncUserName').value = ''; $('syncUserName').defaultValue = ''; }
+      if ($('syncStatus')) $('syncStatus').textContent = '尚未設定同步';
+    }
+
     function confirmClearAll() {
-      if (confirm('確定要清除所有記錄？此操作無法復原！')) {
-        if (confirm('再次確認：真的要刪除全部資料？')) {
-          localStorage.removeItem('yakult_records');
-          showToast('所有資料已清除');
-          renderHistory();
-          onStoreChange();
+      if (!confirm('確定清除所有資料？\n\n包括：歷史記錄、店舖清單、預計轉價、出貨到期日、草稿、同步設定。\n此操作無法復原！')) return;
+      if (!confirm('再次確認：真的要全部清空，變成空白 App？')) return;
+      try {
+        if (typeof stopSyncPolling === 'function') stopSyncPolling();
+        // 歷史與刪除標記
+        localStorage.removeItem('yakult_records');
+        localStorage.removeItem('yakult_deleted_keys');
+        // 店舖
+        localStorage.removeItem('yakult_stores');
+        localStorage.removeItem('yakult_stores_updated_at');
+        STORES = [];
+        // 預計轉價、到期日、折扣、草稿
+        localStorage.removeItem('yakult_scheduled_prices');
+        localStorage.removeItem('yakult_schedule_updated_at');
+        localStorage.removeItem('yakult_expiry_by_date');
+        localStorage.removeItem('yakult_expiry_updated_at');
+        localStorage.removeItem('yakult_store_discount_logs');
+        localStorage.removeItem('yakult_store_discount_logs_at');
+        localStorage.removeItem('yakult_input_draft');
+        localStorage.removeItem('yakult_exchange_ack');
+        // 同步設定與狀態（寫入空白物件再刪，避免殘留）
+        localStorage.setItem('yakult_sync_settings', JSON.stringify({ enabled: false, url: '', key: '', team: '', name: '' }));
+        localStorage.removeItem('yakult_sync_settings');
+        localStorage.removeItem('yakult_sync_last');
+        localStorage.removeItem('yakult_sync_last_ok');
+        localStorage.removeItem('yakult_store_admin_pwd');
+        // 清除可能殘留的其他 key
+        Object.keys(localStorage).forEach(function (k) {
+          if (k.indexOf('yakult_') === 0) localStorage.removeItem(k);
+        });
+      } catch (e) {}
+      STORES = [];
+      // 重建一個空白預設地區
+      const rid = 'region_' + Date.now();
+      regionsData = {
+        currentId: rid,
+        regions: {
+          [rid]: { id: rid, name: '預設地區', stores: [], updatedAt: new Date().toISOString() }
         }
-      }
+      };
+      try { saveRegionsData(regionsData); } catch (e) {}
+      wipeSyncFormUI();
+      if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+      if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
+      if (typeof renderStoreManageList === 'function') renderStoreManageList();
+      if (typeof loadSyncForm === 'function') loadSyncForm();
+      wipeSyncFormUI();
+      if (typeof renderScheduleSummary === 'function') renderScheduleSummary();
+      if (typeof renderExpirySavedList === 'function') renderExpirySavedList();
+      if (typeof renderHistory === 'function') renderHistory();
+      if ($('storeSelect')) $('storeSelect').value = '';
+      if (typeof onStoreChange === 'function') onStoreChange();
+      showToast('已全部清空（含同步設定）');
     }
 
     // ========== 頁面切換 ==========
@@ -4519,6 +4751,8 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         renderHistory();
       }
       if (page === 'settings') {
+      if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+      if (typeof renderStoreManageList === 'function') renderStoreManageList();
       loadScheduleForm();
       _expiryEditMode = false;
       if ($('expiryDatePicker')) { $('expiryDatePicker').disabled = false; $('expiryDatePicker').value = ''; }
