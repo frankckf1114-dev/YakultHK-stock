@@ -378,10 +378,10 @@
     }
     .footer-nav button {
       flex: 1;
-      padding: 10px 4px 8px;
+      padding: 10px 2px 8px;
       border: none;
       background: none;
-      font-size: 0.68rem;
+      font-size: 0.62rem;
       color: var(--muted);
       display: flex;
       flex-direction: column;
@@ -511,6 +511,40 @@
       <div class="card">
         <div class="card-title">最近刪除（24 小時內可復原）</div>
         <div id="trashList" style="font-size:0.85rem;"></div>
+      </div>
+    </div>
+
+    <!-- 行程表 -->
+    <div id="page-route" class="hidden">
+      <div class="card">
+        <div class="card-title">週行程表</div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">按星期一至六安排到店次序，可增刪戶口、上下調整先後。</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;" id="routeDayTabs">
+          <button type="button" class="btn btn-secondary route-day-btn" data-day="1" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(1)">一</button>
+          <button type="button" class="btn btn-secondary route-day-btn" data-day="2" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(2)">二</button>
+          <button type="button" class="btn btn-secondary route-day-btn" data-day="3" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(3)">三</button>
+          <button type="button" class="btn btn-secondary route-day-btn" data-day="4" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(4)">四</button>
+          <button type="button" class="btn btn-secondary route-day-btn" data-day="5" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(5)">五</button>
+          <button type="button" class="btn btn-secondary route-day-btn" data-day="6" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(6)">六</button>
+        </div>
+        <div id="routeDayTitle" style="font-weight:700;color:var(--primary);margin-bottom:8px;"></div>
+        <div id="routeList" style="font-size:0.85rem;margin-bottom:12px;"></div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;">
+          <div style="font-weight:600;margin-bottom:8px;">新增戶口</div>
+          <div style="margin-bottom:8px;">
+            <label>由已有店舖加入</label>
+            <select id="routeAddStoreSelect">
+              <option value="">-- 選擇店舖 --</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-primary" style="margin-bottom:10px;" onclick="addRouteFromStore()">加入已有店舖</button>
+          <div style="margin-bottom:8px;">
+            <label>或輸入新戶口名稱</label>
+            <input type="text" id="routeAddCustomName" placeholder="例如：手作功夫茶（NOVOWALK）" autocomplete="off">
+          </div>
+          <button type="button" class="btn btn-secondary" onclick="addRouteCustom()">加入自訂戶口</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="fillRouteFromVisitDays()">用店舖車期產生初稿</button>
+        </div>
       </div>
     </div>
 
@@ -766,8 +800,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       <span>歷史</span>
     </button>
     <button id="nav-tools" onclick="showPage('tools')">
-      <span class="icon">📅</span>
+      <span class="icon">🏷️</span>
       <span>業務</span>
+    </button>
+    <button id="nav-route" onclick="showPage('route')">
+      <span class="icon">📅</span>
+      <span>行程</span>
     </button>
     <button id="nav-settings" onclick="showPage('settings')">
       <span class="icon">⚙️</span>
@@ -1978,6 +2016,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         expiry: (function(){ try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date')||'{}'); } catch(e){ return {}; } })(),
         storeDiscountLogs: loadStoreDiscountLogs(),
         deletedKeys: loadDeletedKeys(),
+        routes: loadRoutes(),
         meta: {
           updatedBy: s.name || 'unknown',
           updatedAt: new Date().toISOString()
@@ -2072,6 +2111,24 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           if (remoteAt) localStorage.setItem('yakult_stores_updated_at', remoteAt);
           if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
           if (typeof renderStoreManageList === 'function') renderStoreManageList();
+        }
+      }
+      // 行程表：較新時間為準；雲端空白不蓋本機有內容
+      if (payload.routes && typeof payload.routes === 'object') {
+        const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
+        const localAt = localStorage.getItem('yakult_routes_updated_at') || '';
+        let remoteCount = 0;
+        Object.keys(payload.routes).forEach(function (k) {
+          if (Array.isArray(payload.routes[k])) remoteCount += payload.routes[k].length;
+        });
+        let localCount = 0;
+        const localR = loadRoutes();
+        Object.keys(localR).forEach(function (k) { localCount += (localR[k] || []).length; });
+        if (remoteCount === 0 && localCount > 0) {
+          /* skip */
+        } else if (!localAt || (remoteAt && remoteAt > localAt)) {
+          saveRoutes(payload.routes);
+          if (remoteAt) localStorage.setItem('yakult_routes_updated_at', remoteAt);
         }
       }
       return after - before;
@@ -4967,7 +5024,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           try { return JSON.parse(localStorage.getItem('yakult_expiry_by_date') || '{}'); } catch (e) { return {}; }
         })(),
         storeDiscountLogs: (typeof loadStoreDiscountLogs === 'function') ? loadStoreDiscountLogs() : [],
-        deletedKeys: (typeof loadDeletedKeys === 'function') ? loadDeletedKeys() : {}
+        deletedKeys: (typeof loadDeletedKeys === 'function') ? loadDeletedKeys() : {},
+        routes: (typeof loadRoutes === 'function') ? loadRoutes() : {}
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -5054,6 +5112,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           let expiry = null;
           let discounts = null;
           let deletedKeys = null;
+          let routes = null;
 
           // 新格式 v2：完整物件
           if (raw && !Array.isArray(raw) && typeof raw === 'object') {
@@ -5064,6 +5123,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
             if (raw.expiry && typeof raw.expiry === 'object') expiry = raw.expiry;
             if (Array.isArray(raw.storeDiscountLogs)) discounts = raw.storeDiscountLogs;
             if (raw.deletedKeys && typeof raw.deletedKeys === 'object') deletedKeys = raw.deletedKeys;
+            if (raw.routes && typeof raw.routes === 'object') routes = raw.routes;
           } else if (Array.isArray(raw)) {
             // 舊格式：只有記錄陣列
             records = raw;
@@ -5130,6 +5190,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           if (deletedKeys && typeof saveDeletedKeys === 'function') {
             saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), deletedKeys));
           }
+          if (routes && typeof saveRoutes === 'function') {
+            saveRoutes(routes);
+          }
 
           if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
           if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
@@ -5166,6 +5229,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         localStorage.removeItem('yakult_records');
         localStorage.removeItem('yakult_deleted_keys');
         localStorage.removeItem('yakult_trash');
+        localStorage.removeItem('yakult_routes');
+        localStorage.removeItem('yakult_routes_updated_at');
         // 店舖
         localStorage.removeItem('yakult_stores');
         localStorage.removeItem('yakult_stores_updated_at');
@@ -5214,9 +5279,151 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       showToast('已全部清空（含同步設定）');
     }
 
+    // ========== 週行程表 ==========
+    let _routeDay = 1;
+    function loadRoutes() {
+      try {
+        const raw = localStorage.getItem('yakult_routes');
+        const data = raw ? JSON.parse(raw) : {};
+        const out = {};
+        for (let d = 1; d <= 6; d++) {
+          out[d] = Array.isArray(data[d]) ? data[d] : (Array.isArray(data[String(d)]) ? data[String(d)] : []);
+        }
+        return out;
+      } catch (e) {
+        return { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+      }
+    }
+    function saveRoutes(data) {
+      localStorage.setItem('yakult_routes', JSON.stringify(data || {}));
+      localStorage.setItem('yakult_routes_updated_at', new Date().toISOString());
+    }
+    function selectRouteDay(day) {
+      _routeDay = day;
+      document.querySelectorAll('.route-day-btn').forEach(function (btn) {
+        const d = parseInt(btn.getAttribute('data-day'), 10);
+        if (d === day) {
+          btn.classList.remove('btn-secondary');
+          btn.classList.add('btn-primary');
+        } else {
+          btn.classList.add('btn-secondary');
+          btn.classList.remove('btn-primary');
+        }
+      });
+      if ($('routeDayTitle')) $('routeDayTitle').textContent = '星期' + DAY_NAMES[day] + '（' + (loadRoutes()[day] || []).length + ' 戶）';
+      renderRouteList();
+      fillRouteAddStoreSelect();
+    }
+    function fillRouteAddStoreSelect() {
+      const sel = $('routeAddStoreSelect');
+      if (!sel) return;
+      const routes = loadRoutes()[_routeDay] || [];
+      const used = {};
+      routes.forEach(function (r) { if (r.storeId) used[r.storeId] = true; });
+      sel.innerHTML = '<option value="">-- 選擇店舖 --</option>';
+      STORES.slice().sort(function (a, b) { return (a.name || '').localeCompare(b.name || '', 'zh-HK'); }).forEach(function (s) {
+        if (used[s.id]) return;
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        sel.appendChild(opt);
+      });
+    }
+    function renderRouteList() {
+      const box = $('routeList');
+      if (!box) return;
+      const list = loadRoutes()[_routeDay] || [];
+      if (!list.length) {
+        box.innerHTML = '<div style="color:var(--muted);">尚未加入戶口</div>';
+        return;
+      }
+      box.innerHTML = list.map(function (item, i) {
+        const name = item.name || item.storeId || '';
+        return '<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+          '<span style="width:1.5em;color:var(--muted);font-size:0.8rem;">' + (i + 1) + '</span>' +
+          '<span style="flex:1;min-width:0;">' + name + '</span>' +
+          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 8px;font-size:0.75rem;" onclick="moveRouteItem(' + i + ',-1)" ' + (i === 0 ? 'disabled' : '') + '>上</button>' +
+          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 8px;font-size:0.75rem;" onclick="moveRouteItem(' + i + ',1)" ' + (i === list.length - 1 ? 'disabled' : '') + '>下</button>' +
+          '<button type="button" class="btn" style="width:auto;padding:4px 8px;font-size:0.75rem;background:#dc3545;color:#fff;" onclick="removeRouteItem(' + i + ')">刪</button>' +
+          '</div>';
+      }).join('');
+    }
+    function addRouteFromStore() {
+      const sid = $('routeAddStoreSelect') && $('routeAddStoreSelect').value;
+      if (!sid) { showToast('請選擇店舖'); return; }
+      const st = STORES.find(function (s) { return s.id === sid; });
+      if (!st) return;
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      if (list.some(function (x) { return x.storeId === sid; })) {
+        showToast('此店已在行程內');
+        return;
+      }
+      list.push({ storeId: st.id, name: st.name });
+      data[_routeDay] = list;
+      saveRoutes(data);
+      selectRouteDay(_routeDay);
+      showToast('已加入 ' + st.name);
+    }
+    function addRouteCustom() {
+      const name = (($('routeAddCustomName') && $('routeAddCustomName').value) || '').trim();
+      if (!name) { showToast('請輸入戶口名稱'); return; }
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      list.push({ storeId: '', name: name, custom: true });
+      data[_routeDay] = list;
+      saveRoutes(data);
+      if ($('routeAddCustomName')) $('routeAddCustomName').value = '';
+      selectRouteDay(_routeDay);
+      showToast('已加入自訂戶口');
+    }
+    function removeRouteItem(idx) {
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      if (idx < 0 || idx >= list.length) return;
+      const name = list[idx].name || '';
+      list.splice(idx, 1);
+      data[_routeDay] = list;
+      saveRoutes(data);
+      selectRouteDay(_routeDay);
+      showToast('已移除 ' + name);
+    }
+    function moveRouteItem(idx, dir) {
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      const j = idx + dir;
+      if (j < 0 || j >= list.length) return;
+      const tmp = list[idx];
+      list[idx] = list[j];
+      list[j] = tmp;
+      data[_routeDay] = list;
+      saveRoutes(data);
+      renderRouteList();
+    }
+    // 以店舖管理的車期，產生當日行程初稿（只加未在名單的店）
+    function fillRouteFromVisitDays() {
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      const have = {};
+      list.forEach(function (x) { if (x.storeId) have[x.storeId] = true; });
+      let n = 0;
+      STORES.forEach(function (s) {
+        const days = s.visitDays || [];
+        if (days.indexOf(_routeDay) < 0) return;
+        if (have[s.id]) return;
+        list.push({ storeId: s.id, name: s.name });
+        have[s.id] = true;
+        n++;
+      });
+      data[_routeDay] = list;
+      saveRoutes(data);
+      selectRouteDay(_routeDay);
+      showToast(n ? ('已加入 ' + n + ' 間（車期含星期' + DAY_NAMES[_routeDay] + '）') : '沒有可新增的店舖');
+    }
+
     // ========== 頁面切換 ==========
     function showPage(page) {
-      ['today', 'history', 'tools', 'settings'].forEach(p => {
+      ['today', 'history', 'tools', 'route', 'settings'].forEach(p => {
         const pg = $('page-' + p);
         const nv = $('nav-' + p);
         if (pg) pg.classList.toggle('hidden', p !== page);
@@ -5228,6 +5435,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if (page === 'history') {
         renderHistory();
         if (typeof renderTrashList === 'function') renderTrashList();
+      }
+      if (page === 'route') {
+        const d = new Date().getDay();
+        selectRouteDay(d >= 1 && d <= 6 ? d : 1);
       }
       if (page === 'tools') {
         loadScheduleForm();
