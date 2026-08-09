@@ -3972,8 +3972,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function clearForm() {
       editingOriginal = null;
-      // 先清店舖，避免後面讀取不存在的產品欄位報錯
+      // 先清店舖／搜尋，避免後面讀取不存在的產品欄位報錯
+      if ($('storeSearch')) $('storeSearch').value = '';
       if ($('storeSelect')) $('storeSelect').value = '';
+      if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
       // 安全清除畫面上存在的輸入格
       PRODUCTS.forEach(p => {
         const s = $('stock-' + p.id);
@@ -4094,7 +4096,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (pr) pr.value = '';
         if (o) o.value = '';
       });
+      if ($('storeSearch')) $('storeSearch').value = '';
       if ($('storeSelect')) $('storeSelect').value = '';
+      if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
       onStoreChange();
       showToast(moved ? ('已搬移至 ' + date + ' 並清空') : (isUpdate ? '已更新並清空' : '已儲存，可選擇下一間店'));
       if (getSyncSettings().enabled && isSyncConfigured()) {
