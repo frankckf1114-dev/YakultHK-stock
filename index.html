@@ -14,6 +14,8 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
   <title>存貨管理</title>
   <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <style>
     :root {
       /* 香港益力多乳品有限公司官網風：紅白潔淨 */
@@ -545,7 +547,38 @@
           <button type="button" class="btn btn-secondary" onclick="addRouteCustom()">加入自訂戶口</button>
           <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="resetRoutesFromDefault()">還原圖表預設行程</button>
           <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRoutePDF()">📄 匯出行程 PDF（給替車）</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#2e7d32;" onclick="openRouteMapView()">🗺️ 從地圖看行程</button>
+          <p style="font-size:0.75rem;color:var(--muted);margin-top:8px;">每個戶口請按「點」在地圖上選位置；選完後可「從地圖看行程」顯示當日路線次序。</p>
         </div>
+      </div>
+    </div>
+
+    <!-- 地圖選點 -->
+    <div id="mapPickModal" class="hidden" style="position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.45);display:none;flex-direction:column;">
+      <div style="background:#fff;margin:auto 0 0;border-radius:16px 16px 0 0;max-height:92vh;display:flex;flex-direction:column;width:100%;">
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;">
+          <div style="font-weight:700;color:var(--primary);font-size:0.95rem;" id="mapPickTitle">地圖選點</div>
+          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:0.85rem;" onclick="closeMapPick()">關閉</button>
+        </div>
+        <div style="padding:8px 14px;font-size:0.8rem;color:var(--muted);">點擊地圖設定位置，可拖動標記微調。</div>
+        <div id="mapPickCanvas" style="height:48vh;min-height:260px;width:100%;"></div>
+        <div style="padding:12px 14px;display:flex;gap:8px;">
+          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeMapPick()">取消</button>
+          <button type="button" class="btn btn-primary" style="flex:1;" onclick="confirmMapPick()">確認位置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 地圖看行程 -->
+    <div id="mapRouteModal" class="hidden" style="position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.45);display:none;flex-direction:column;">
+      <div style="background:#fff;margin:auto 0 0;border-radius:16px 16px 0 0;max-height:94vh;display:flex;flex-direction:column;width:100%;">
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;">
+          <div style="font-weight:700;color:var(--primary);font-size:0.95rem;" id="mapRouteTitle">地圖行程</div>
+          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:0.85rem;" onclick="closeRouteMapView()">關閉</button>
+        </div>
+        <div id="mapRouteHint" style="padding:6px 14px;font-size:0.78rem;color:var(--muted);"></div>
+        <div id="mapRouteCanvas" style="height:55vh;min-height:280px;width:100%;"></div>
+        <div id="mapRouteLegend" style="padding:10px 14px;max-height:22vh;overflow-y:auto;font-size:0.8rem;border-top:1px solid #eee;"></div>
       </div>
     </div>
 
@@ -2018,6 +2051,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         storeDiscountLogs: loadStoreDiscountLogs(),
         deletedKeys: loadDeletedKeys(),
         routes: loadRoutes(),
+        routeCoords: loadRouteCoords(),
         meta: {
           updatedBy: s.name || 'unknown',
           updatedAt: new Date().toISOString()
@@ -2130,6 +2164,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         } else if (!localAt || (remoteAt && remoteAt > localAt)) {
           saveRoutes(payload.routes);
           if (remoteAt) localStorage.setItem('yakult_routes_updated_at', remoteAt);
+          if (payload.routeCoords && typeof payload.routeCoords === 'object') saveRouteCoords(payload.routeCoords);
         }
       }
       return after - before;
@@ -5026,7 +5061,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         })(),
         storeDiscountLogs: (typeof loadStoreDiscountLogs === 'function') ? loadStoreDiscountLogs() : [],
         deletedKeys: (typeof loadDeletedKeys === 'function') ? loadDeletedKeys() : {},
-        routes: (typeof loadRoutes === 'function') ? loadRoutes() : {}
+        routes: (typeof loadRoutes === 'function') ? loadRoutes() : {},
+        routeCoords: (typeof loadRouteCoords === 'function') ? loadRouteCoords() : {}
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -5194,6 +5230,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           if (routes && typeof saveRoutes === 'function') {
             saveRoutes(routes);
           }
+          if (raw.routeCoords && typeof saveRouteCoords === 'function') {
+            saveRouteCoords(raw.routeCoords);
+          }
 
           if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
           if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
@@ -5233,6 +5272,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         localStorage.removeItem('yakult_routes');
         localStorage.removeItem('yakult_routes_updated_at');
         localStorage.removeItem('yakult_routes_ver');
+        localStorage.removeItem('yakult_route_coords');
         // 店舖
         localStorage.removeItem('yakult_stores');
         localStorage.removeItem('yakult_stores_updated_at');
@@ -5362,35 +5402,239 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         box.innerHTML = '<div style="color:var(--muted);">尚未加入戶口</div>';
         return;
       }
+      const coords = loadRouteCoords();
       box.innerHTML = list.map(function (item, i) {
-        const name = (item.name || item.storeId || '').replace(/"/g, '&quot;');
-        return '<div class="route-row" data-idx="' + i + '" style="display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid #f0f0f0;background:#fff;touch-action:none;">' +
-          '<span class="route-handle" title="拖動排序" style="cursor:grab;user-select:none;color:#999;font-size:1.1rem;padding:4px 6px;flex-shrink:0;">☰</span>' +
-          '<span style="width:1.4em;color:var(--muted);font-size:0.75rem;flex-shrink:0;">' + (i + 1) + '</span>' +
-          '<input type="text" class="route-name-input" data-idx="' + i + '" value="' + name + '" ' +
-          'style="flex:1;min-width:0;padding:6px 8px;font-size:0.85rem;border:1px solid var(--border);border-radius:8px;" ' +
-          'onchange="renameRouteItem(' + i + ', this.value)" onblur="renameRouteItem(' + i + ', this.value)">' +
-          '<button type="button" class="btn" style="width:auto;padding:4px 8px;font-size:0.75rem;background:#dc3545;color:#fff;flex-shrink:0;" onclick="removeRouteItem(' + i + ')">刪</button>' +
+        const name = item.name || item.storeId || '';
+        const safe = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const c = getItemCoords(item, coords);
+        const pin = c ? '📍' : '○';
+        const pinColor = c ? '#2e7d32' : '#999';
+        return '<div class="route-row" data-idx="' + i + '" style="display:flex;align-items:center;gap:5px;padding:8px 0;border-bottom:1px solid #f0f0f0;background:#fff;">' +
+          '<span class="route-handle" title="拖動排序" style="cursor:grab;user-select:none;color:#999;font-size:1.05rem;padding:4px 4px;flex-shrink:0;touch-action:none;">☰</span>' +
+          '<span style="width:1.3em;color:var(--muted);font-size:0.75rem;flex-shrink:0;">' + (i + 1) + '</span>' +
+          '<span style="flex:1;min-width:0;font-size:0.85rem;line-height:1.35;">' + safe + '</span>' +
+          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 7px;font-size:0.72rem;flex-shrink:0;color:' + pinColor + ';" onclick="openMapPick(' + i + ')">' + pin + '點</button>' +
+          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 7px;font-size:0.72rem;flex-shrink:0;" onclick="editRouteItemName(' + i + ')">修</button>' +
+          '<button type="button" class="btn" style="width:auto;padding:4px 7px;font-size:0.72rem;background:#dc3545;color:#fff;flex-shrink:0;" onclick="removeRouteItem(' + i + ')">刪</button>' +
           '</div>';
       }).join('');
       setupRouteDrag(box);
     }
 
-    function renameRouteItem(idx, newName) {
-      const name = String(newName || '').trim();
+    function editRouteItemName(idx) {
       const data = loadRoutes();
       const list = data[_routeDay] || [];
       if (idx < 0 || idx >= list.length) return;
-      if (!name) {
+      const cur = list[idx].name || '';
+      const name = prompt('修改戶口名稱', cur);
+      if (name === null) return;
+      const trimmed = String(name).trim();
+      if (!trimmed) {
         showToast('名稱不可空白');
-        renderRouteList();
         return;
       }
-      if (list[idx].name === name) return;
-      list[idx].name = name;
+      if (trimmed === cur) return;
+      // 若改名，遷移座標
+      const coords = loadRouteCoords();
+      if (cur && coords[cur] && !coords[trimmed]) {
+        coords[trimmed] = coords[cur];
+        saveRouteCoords(coords);
+      }
+      list[idx].name = trimmed;
       list[idx].custom = true;
       data[_routeDay] = list;
       saveRoutes(data);
+      renderRouteList();
+      showToast('已更新名稱');
+    }
+
+    // ========== 地圖座標（按戶口名稱共用）==========
+    const TM_CENTER = [22.391, 113.977]; // 屯門約中心
+    let _mapPick = null; // { map, marker, idx, lat, lng }
+    let _mapRoute = null; // { map, layer }
+
+    function loadRouteCoords() {
+      try {
+        const raw = localStorage.getItem('yakult_route_coords');
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) { return {}; }
+    }
+    function saveRouteCoords(obj) {
+      localStorage.setItem('yakult_route_coords', JSON.stringify(obj || {}));
+    }
+    function getItemCoords(item, coordsMap) {
+      coordsMap = coordsMap || loadRouteCoords();
+      if (item && item.lat != null && item.lng != null) {
+        return { lat: Number(item.lat), lng: Number(item.lng) };
+      }
+      const n = item && item.name;
+      if (n && coordsMap[n] && coordsMap[n].lat != null) {
+        return { lat: Number(coordsMap[n].lat), lng: Number(coordsMap[n].lng) };
+      }
+      return null;
+    }
+    function setCoordsForName(name, lat, lng) {
+      if (!name) return;
+      const coords = loadRouteCoords();
+      coords[name] = { lat: lat, lng: lng };
+      saveRouteCoords(coords);
+      // 同步寫入所有同名行程項目
+      const data = loadRoutes();
+      for (let d = 1; d <= 6; d++) {
+        (data[d] || []).forEach(function (it) {
+          if (it.name === name) {
+            it.lat = lat;
+            it.lng = lng;
+          }
+        });
+      }
+      saveRoutes(data);
+    }
+
+    function openMapPick(idx) {
+      if (typeof L === 'undefined') {
+        showToast('地圖載入中，請稍後再試（需網絡）');
+        return;
+      }
+      const list = loadRoutes()[_routeDay] || [];
+      if (idx < 0 || idx >= list.length) return;
+      const item = list[idx];
+      const name = item.name || '';
+      const cur = getItemCoords(item);
+      const modal = $('mapPickModal');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      modal.classList.remove('hidden');
+      if ($('mapPickTitle')) $('mapPickTitle').textContent = '選點：' + name;
+      setTimeout(function () {
+        const el = $('mapPickCanvas');
+        if (!el) return;
+        if (_mapPick && _mapPick.map) {
+          try { _mapPick.map.remove(); } catch (e) {}
+          _mapPick = null;
+        }
+        el.innerHTML = '';
+        const start = cur ? [cur.lat, cur.lng] : TM_CENTER;
+        const map = L.map(el).setView(start, cur ? 17 : 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+        const marker = L.marker(start, { draggable: true }).addTo(map);
+        _mapPick = { map: map, marker: marker, idx: idx, lat: start[0], lng: start[1], name: name };
+        marker.on('dragend', function () {
+          const p = marker.getLatLng();
+          _mapPick.lat = p.lat;
+          _mapPick.lng = p.lng;
+        });
+        map.on('click', function (e) {
+          marker.setLatLng(e.latlng);
+          _mapPick.lat = e.latlng.lat;
+          _mapPick.lng = e.latlng.lng;
+        });
+        setTimeout(function () { map.invalidateSize(); }, 200);
+      }, 50);
+    }
+    function closeMapPick() {
+      const modal = $('mapPickModal');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.classList.add('hidden');
+      }
+      if (_mapPick && _mapPick.map) {
+        try { _mapPick.map.remove(); } catch (e) {}
+      }
+      _mapPick = null;
+    }
+    function confirmMapPick() {
+      if (!_mapPick) return;
+      const lat = _mapPick.lat;
+      const lng = _mapPick.lng;
+      const name = _mapPick.name;
+      const idx = _mapPick.idx;
+      setCoordsForName(name, lat, lng);
+      closeMapPick();
+      renderRouteList();
+      showToast('已設定「' + name + '」位置');
+    }
+
+    function openRouteMapView() {
+      if (typeof L === 'undefined') {
+        showToast('地圖載入中，請稍後再試（需網絡）');
+        return;
+      }
+      const list = loadRoutes()[_routeDay] || [];
+      if (!list.length) {
+        showToast('當日無行程');
+        return;
+      }
+      const coords = loadRouteCoords();
+      const points = [];
+      const missing = [];
+      list.forEach(function (item, i) {
+        const c = getItemCoords(item, coords);
+        if (c) points.push({ i: i + 1, name: item.name || '', lat: c.lat, lng: c.lng });
+        else missing.push((i + 1) + '. ' + (item.name || ''));
+      });
+      if (!points.length) {
+        showToast('請先為戶口按「點」設定地圖位置');
+        return;
+      }
+      const modal = $('mapRouteModal');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      modal.classList.remove('hidden');
+      const dayLabel = '星期' + DAY_NAMES[_routeDay];
+      if ($('mapRouteTitle')) $('mapRouteTitle').textContent = dayLabel + ' · 地圖行程';
+      if ($('mapRouteHint')) {
+        $('mapRouteHint').textContent = points.length + ' / ' + list.length + ' 戶已選點' +
+          (missing.length ? '　·　未選點：' + missing.slice(0, 5).join('、') + (missing.length > 5 ? '…' : '') : '');
+      }
+      if ($('mapRouteLegend')) {
+        $('mapRouteLegend').innerHTML = points.map(function (p) {
+          return '<div style="padding:2px 0;"><strong style="color:var(--primary);">' + p.i + '</strong>　' +
+            String(p.name).replace(/</g, '&lt;') + '</div>';
+        }).join('');
+      }
+      setTimeout(function () {
+        const el = $('mapRouteCanvas');
+        if (!el) return;
+        if (_mapRoute && _mapRoute.map) {
+          try { _mapRoute.map.remove(); } catch (e) {}
+          _mapRoute = null;
+        }
+        el.innerHTML = '';
+        const map = L.map(el);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+        const latlngs = points.map(function (p) { return [p.lat, p.lng]; });
+        const line = L.polyline(latlngs, { color: '#E60012', weight: 4, opacity: 0.85 }).addTo(map);
+        points.forEach(function (p) {
+          const icon = L.divIcon({
+            className: '',
+            html: '<div style="background:#E60012;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);">' + p.i + '</div>',
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+          });
+          L.marker([p.lat, p.lng], { icon: icon }).addTo(map).bindPopup('<strong>' + p.i + '. ' + p.name + '</strong>');
+        });
+        map.fitBounds(line.getBounds().pad(0.15));
+        _mapRoute = { map: map };
+        setTimeout(function () { map.invalidateSize(); }, 200);
+      }, 50);
+    }
+    function closeRouteMapView() {
+      const modal = $('mapRouteModal');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.classList.add('hidden');
+      }
+      if (_mapRoute && _mapRoute.map) {
+        try { _mapRoute.map.remove(); } catch (e) {}
+      }
+      _mapRoute = null;
     }
 
     function setupRouteDrag(box) {
