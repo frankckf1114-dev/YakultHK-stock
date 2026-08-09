@@ -640,7 +640,8 @@
         <div class="card-title">區內資料同步</div>
         <p style="font-size:0.85rem; color:var(--muted); margin-bottom:10px; line-height:1.5;">
           資料會上<strong>雲端</strong>。儲存後會自動上傳；對方 App 開著時約 <strong>5 秒</strong>更新，亦可按「立即同步」。<br>
-          雙方須填<strong>相同同步碼</strong>。本機仍保留一份，可離線先記、有網再同步。
+          雙方須填<strong>相同同步碼</strong>。本機仍保留一份，可離線先記、有網再同步。<br>
+          <strong style="color:#c62828;">保護：</strong>雲端空白唔會覆蓋本機；本機空白亦唔會上傳清空雲端。
         </p>
         <div style="margin-bottom:8px;">
           <label>啟用同步</label>
@@ -1739,7 +1740,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       });
       return out;
     }
-    function mergeRecords(localArr, remoteArr) {
+    // applyTombstones: 是否套用本機 deletedKeys 刪除；遠端空白時應關閉，以免被清空
+    function mergeRecords(localArr, remoteArr, applyTombstones) {
       const map = {};
       (remoteArr || []).forEach(r => {
         if (!r || !r.storeId || !r.date) return;
@@ -1754,28 +1756,27 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const t2 = r.updatedAt || '';
         const newer = (t2 >= t1) ? r : ex;
         const older = (t2 >= t1) ? ex : r;
-        // 保留最早的首次記錄時間，避免改價／同步打亂歷史排序
         const c1 = newer.createdAt || newer.updatedAt || '';
         const c2 = older.createdAt || older.updatedAt || '';
         let createdAt = c1;
         if (c2 && (!c1 || c2 < c1)) createdAt = c2;
         map[k] = Object.assign({}, newer, { createdAt: createdAt || newer.createdAt || newer.updatedAt });
       });
-      // 已刪除嘅記錄：若 tombstone 時間 ≥ 記錄 updatedAt，唔再加返
-      const deleted = loadDeletedKeys();
-      Object.keys(deleted).forEach(k => {
-        const rec = map[k];
-        if (!rec) return;
-        const delAt = deleted[k] || '';
-        const upd = rec.updatedAt || '';
-        if (delAt >= upd) delete map[k];
-      });
+      if (applyTombstones !== false) {
+        const deleted = loadDeletedKeys();
+        Object.keys(deleted).forEach(k => {
+          const rec = map[k];
+          if (!rec) return;
+          const delAt = deleted[k] || '';
+          const upd = rec.updatedAt || '';
+          if (delAt >= upd) delete map[k];
+        });
+      }
       return Object.values(map).sort((a, b) =>
         a.date.localeCompare(b.date) || (a.storeName || '').localeCompare(b.storeName || '')
       );
     }
 
-    // 保護：空白／近乎空白的資料包
     function recordCountOf(payloadOrArr) {
       if (!payloadOrArr) return 0;
       if (Array.isArray(payloadOrArr)) return payloadOrArr.length;
@@ -1784,6 +1785,26 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
     function isEmptyRecordsPayload(payload) {
       return recordCountOf(payload) === 0;
+    }
+
+    // 安全寫入記錄：合併後筆數不可無故少過本機（防止空白雲端／錯誤 tombstone 清檔）
+    function safeWriteMergedRecords(localArr, remoteArr, opts) {
+      opts = opts || {};
+      const local = localArr || [];
+      const remote = remoteArr || [];
+      // 雲端空白 → 完全保留本機
+      if (remote.length === 0 && local.length > 0) {
+        return { records: local.slice(), skipped: true, reason: 'remote_empty' };
+      }
+      // 雲端明顯少很多（少於本機一半且本機≥3筆）→ 只做「加料合併」，不套用 tombstone
+      const sparseRemote = local.length >= 3 && remote.length < local.length * 0.5;
+      const applyTomb = sparseRemote ? false : (opts.applyTombstones !== false);
+      const merged = mergeRecords(local, remote, applyTomb);
+      // 最後防線：合併後變少 → 退回本機
+      if (merged.length < local.length && remote.length <= local.length) {
+        return { records: local.slice(), skipped: true, reason: 'merge_shrunk' };
+      }
+      return { records: merged, skipped: false };
     }
 
     function buildSyncPayload() {
@@ -1805,19 +1826,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function applyRemotePayload(payload) {
       if (!payload || typeof payload !== 'object') return 0;
-      if (payload.deletedKeys && typeof payload.deletedKeys === 'object') {
+      const local = loadData();
+      const remoteRecs = Array.isArray(payload.records) ? payload.records : [];
+      const before = local.length;
+
+      // ★ 雲端空白／明顯偏少：唔接收遠端 deletedKeys（避免「清除」tombstone 清光本機）
+      const remoteSparse = remoteRecs.length === 0 || (before >= 3 && remoteRecs.length < before * 0.5);
+      if (payload.deletedKeys && typeof payload.deletedKeys === 'object' && !remoteSparse) {
         saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), payload.deletedKeys));
       }
-      const local = loadData();
-      const remoteRecs = payload.records || [];
-      // ★ 保護：雲端無記錄、本機有記錄 → 絕不把本機清空
-      if (remoteRecs.length === 0 && local.length > 0) {
-        // 只合併 tombstone，唔動 records
-      } else {
-        const merged = mergeRecords(local, remoteRecs);
-        localStorage.setItem('yakult_records', JSON.stringify(merged));
+
+      const result = safeWriteMergedRecords(local, remoteRecs, { applyTombstones: !remoteSparse });
+      if (!result.skipped) {
+        localStorage.setItem('yakult_records', JSON.stringify(result.records));
       }
-      const before = local.length;
+      // skipped 時維持本機原樣
       const after = loadData().length;
 
       if (payload.schedule && typeof payload.schedule === 'object') {
@@ -1950,40 +1973,50 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
         const countBefore = loadData().length;
         const remoteRecCount = recordCountOf(remotePayload);
-        if (remotePayload) {
-          // preferPush：本機為準；仍合併 tombstone
-          if (preferPush) {
-            if (remotePayload.deletedKeys && typeof remotePayload.deletedKeys === 'object') {
-              saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), remotePayload.deletedKeys));
-            }
-          } else {
-            // ★ 雲端空白、本機有資料 → 唔套用雲端記錄（避免被清空）
-            if (remoteRecCount === 0 && countBefore > 0) {
-              if (showMsg) showToast('雲端無記錄，已保留本機資料');
-            } else {
-              applyRemotePayload(remotePayload);
-            }
+
+        // ── 同步策略（防止空白覆蓋）──
+        // A) 本機有、雲端無 → 只上傳本機，绝不套用雲端
+        // B) 本機無、雲端有 → 只下載雲端，绝不上傳空白
+        // C) 兩邊都有 → 安全合併（合併後變少則保留本機）
+        // D) preferPush（剛儲存）→ 本機優先上傳
+        let skipUpload = false;
+        let skipApply = false;
+
+        if (countBefore > 0 && remoteRecCount === 0) {
+          skipApply = true;
+          if (showMsg) showToast('雲端無記錄，保留本機並上傳');
+        } else if (countBefore === 0 && remoteRecCount > 0) {
+          skipUpload = true;
+          if (remotePayload) applyRemotePayload(remotePayload);
+          if (showMsg) showToast('已從雲端還原 ' + loadData().length + ' 筆');
+        } else if (preferPush) {
+          skipApply = true; // 剛儲存：唔好被雲端舊 tombstone 蓋
+        } else if (remotePayload) {
+          applyRemotePayload(remotePayload);
+          // 合併後若筆數異常減少，已在 safeWriteMergedRecords 退回本機
+          if (loadData().length < countBefore && countBefore > 0) {
+            if (showMsg) showToast('已攔截異常覆蓋，保留本機記錄');
           }
         }
+
         const countAfter = loadData().length;
         const remoteNewer = remoteStamp && remoteStamp !== _lastRemoteStamp;
         if (remoteNewer) _lastRemoteStamp = remoteStamp;
 
-        // 2) 上傳本機（已合併）資料
-        // ★ 保護：本機空白但雲端有記錄 → 禁止上傳，以免清空雲端
-        if (!pullOnly) {
+        // 2) 上傳
+        if (!pullOnly && !skipUpload) {
           const out = buildSyncPayload();
           const localRecCount = recordCountOf(out);
+
+          // 雙重保險：本機仍空且雲端有數 → 唔上傳
           if (localRecCount === 0 && remoteRecCount > 0) {
-            if (status) status.textContent = '已跳過上傳：本機無記錄，保留雲端 ' + remoteRecCount + ' 筆';
-            if (showMsg) showToast('本機無記錄，已跳過上傳（避免清空雲端）');
-            // 若雲端有資料、本機空，改為只拉落本機
-            if (remotePayload && remoteRecCount > 0 && countAfter === 0) {
-              applyRemotePayload(remotePayload);
-              if (showMsg) showToast('已從雲端還原 ' + recordCountOf(remotePayload) + ' 筆記錄');
-              if (typeof renderHistory === 'function') { try { renderHistory(); } catch (e) {} }
-            }
+            if (status) status.textContent = '已跳過上傳（本機空／雲端有資料）';
+            if (showMsg) showToast('已跳過上傳，避免清空雲端');
           } else {
+            // 上傳前再保證：payload 記錄數唔少過合併前本機（除非本機本來就少）
+            if (localRecCount < countBefore && countBefore > 0 && remoteRecCount === 0) {
+              out.records = loadData();
+            }
             const bodyObj = {
               team_code: teamRaw,
               payload: out,
@@ -2025,10 +2058,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
               const errText = await putRes.text();
               throw new Error('上傳HTTP' + putRes.status + ' ' + errText.slice(0, 120));
             }
-            if (showMsg) showToast('已同步到雲端');
+            if (showMsg) showToast('已同步到雲端（' + localRecCount + ' 筆）');
           }
-        } else {
-          if (showMsg) showToast('已從雲端更新');
+        } else if (pullOnly && showMsg) {
+          showToast('已從雲端更新');
         }
 
         const now = new Date();
@@ -2038,9 +2071,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         localStorage.setItem('yakult_sync_last', label);
         localStorage.setItem('yakult_sync_last_ok', '1');
         updateSyncStatusText();
-        if (pullOnly && remoteNewer) {
-          if (loadData().length !== countBefore) showToast('已收到同事的最新記錄');
-          else if (showMsg) showToast('雲端資料已更新');
+        if (pullOnly && remoteNewer && loadData().length > countBefore) {
+          showToast('已收到同事的最新記錄');
         }
         if (typeof renderHistory === 'function') { try { renderHistory(); } catch (e) {} }
       } catch (e) {
