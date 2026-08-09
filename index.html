@@ -546,6 +546,7 @@
             <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">＋ 新增</button>
           </div>
           <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRoutePDF()">📄 匯出當日行程 PDF</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRouteImage()">🖼️ 匯出當日行程長圖</button>
         </div>
       </div>
     </div>
@@ -6129,6 +6130,135 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       w.document.write(html);
       w.document.close();
       showToast('已匯出「' + dayLabel + '」行程');
+    }
+
+    // 一鍵匯出當日行程長圖（PNG），方便傳給不懂開 PDF 的同事
+    function exportRouteImage() {
+      const day = _routeDay || 1;
+      const list = loadRoutes()[day] || [];
+      if (!list.length) {
+        showToast('此日沒有行程，請先選擇有戶口的日子');
+        return;
+      }
+      const dayLabel = '星期' + DAY_NAMES[day];
+      const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
+      const scale = 2; // 高清
+      const width = 420;
+      const pad = 20;
+      const titleH = 36;
+      const metaH = 28;
+      const headH = 40;
+      const rowH = 36;
+      const footH = 36;
+      const height = pad + titleH + metaH + headH + list.length * rowH + footH + pad;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+
+      // 背景
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      // 標題
+      ctx.fillStyle = '#E60012';
+      ctx.font = 'bold 22px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText(dayLabel + ' 行程', pad, pad);
+
+      // 副標
+      ctx.fillStyle = '#888888';
+      ctx.font = '13px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.fillText(list.length + ' 戶　·　產生時間：' + genTime, pad, pad + titleH);
+
+      // 表頭
+      const tableTop = pad + titleH + metaH;
+      ctx.fillStyle = '#E60012';
+      ctx.fillRect(pad, tableTop, width - pad * 2, headH);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 15px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('#', pad + 12, tableTop + headH / 2);
+      ctx.fillText('戶口', pad + 48, tableTop + headH / 2);
+
+      // 列
+      list.forEach(function (item, i) {
+        const y = tableTop + headH + i * rowH;
+        if (i % 2 === 1) {
+          ctx.fillStyle = '#fafafa';
+          ctx.fillRect(pad, y, width - pad * 2, rowH);
+        }
+        // 底線
+        ctx.strokeStyle = '#eeeeee';
+        ctx.beginPath();
+        ctx.moveTo(pad, y + rowH);
+        ctx.lineTo(width - pad, y + rowH);
+        ctx.stroke();
+
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#E60012';
+        ctx.font = 'bold 15px "PingFang TC","Microsoft JhengHei",sans-serif';
+        ctx.fillText(String(i + 1), pad + 12, y + rowH / 2);
+
+        ctx.fillStyle = '#222222';
+        ctx.font = '15px "PingFang TC","Microsoft JhengHei",sans-serif';
+        let name = (item && item.name) ? String(item.name) : '';
+        // 過長截斷
+        const maxW = width - pad * 2 - 56;
+        while (name.length > 1 && ctx.measureText(name).width > maxW) {
+          name = name.slice(0, -1);
+        }
+        if (name !== (item && item.name ? String(item.name) : '') && name.length > 0) {
+          name = name.slice(0, -1) + '…';
+        }
+        ctx.fillText(name, pad + 48, y + rowH / 2);
+      });
+
+      // 註腳
+      const footY = tableTop + headH + list.length * rowH + 12;
+      ctx.fillStyle = '#999999';
+      ctx.font = '12px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText('按編號順序到店。', pad, footY);
+
+      const fileName = dayLabel + '行程.png';
+      canvas.toBlob(function (blob) {
+        if (!blob) {
+          showToast('產生圖片失敗');
+          return;
+        }
+        // 支援分享則優先分享，否則下載
+        const file = new File([blob], fileName, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: dayLabel + ' 行程',
+            text: dayLabel + ' 行程（' + list.length + ' 戶）'
+          }).then(function () {
+            showToast('已分享長圖');
+          }).catch(function () {
+            downloadRouteImageBlob(blob, fileName);
+          });
+        } else {
+          downloadRouteImageBlob(blob, fileName);
+        }
+      }, 'image/png');
+    }
+
+    function downloadRouteImageBlob(blob, fileName) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || '行程.png';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 500);
+      showToast('長圖已下載，可傳送給同事');
     }
 
     function resetRoutesFromDefault() {
