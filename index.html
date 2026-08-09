@@ -544,6 +544,7 @@
           </div>
           <button type="button" class="btn btn-secondary" onclick="addRouteCustom()">加入自訂戶口</button>
           <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="resetRoutesFromDefault()">還原圖表預設行程</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRoutePDF()">📄 匯出行程 PDF（給替車）</button>
         </div>
       </div>
     </div>
@@ -5346,6 +5347,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         sel.appendChild(opt);
       });
     }
+    let _routeDrag = null; // { from, el }
+
     function renderRouteList() {
       const box = $('routeList');
       if (!box) return;
@@ -5355,15 +5358,103 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       box.innerHTML = list.map(function (item, i) {
-        const name = item.name || item.storeId || '';
-        return '<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
-          '<span style="width:1.5em;color:var(--muted);font-size:0.8rem;">' + (i + 1) + '</span>' +
-          '<span style="flex:1;min-width:0;">' + name + '</span>' +
-          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 8px;font-size:0.75rem;" onclick="moveRouteItem(' + i + ',-1)" ' + (i === 0 ? 'disabled' : '') + '>上</button>' +
-          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 8px;font-size:0.75rem;" onclick="moveRouteItem(' + i + ',1)" ' + (i === list.length - 1 ? 'disabled' : '') + '>下</button>' +
-          '<button type="button" class="btn" style="width:auto;padding:4px 8px;font-size:0.75rem;background:#dc3545;color:#fff;" onclick="removeRouteItem(' + i + ')">刪</button>' +
+        const name = (item.name || item.storeId || '').replace(/"/g, '&quot;');
+        return '<div class="route-row" data-idx="' + i + '" style="display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid #f0f0f0;background:#fff;touch-action:none;">' +
+          '<span class="route-handle" title="拖動排序" style="cursor:grab;user-select:none;color:#999;font-size:1.1rem;padding:4px 6px;flex-shrink:0;">☰</span>' +
+          '<span style="width:1.4em;color:var(--muted);font-size:0.75rem;flex-shrink:0;">' + (i + 1) + '</span>' +
+          '<input type="text" class="route-name-input" data-idx="' + i + '" value="' + name + '" ' +
+          'style="flex:1;min-width:0;padding:6px 8px;font-size:0.85rem;border:1px solid var(--border);border-radius:8px;" ' +
+          'onchange="renameRouteItem(' + i + ', this.value)" onblur="renameRouteItem(' + i + ', this.value)">' +
+          '<button type="button" class="btn" style="width:auto;padding:4px 8px;font-size:0.75rem;background:#dc3545;color:#fff;flex-shrink:0;" onclick="removeRouteItem(' + i + ')">刪</button>' +
           '</div>';
       }).join('');
+      setupRouteDrag(box);
+    }
+
+    function renameRouteItem(idx, newName) {
+      const name = String(newName || '').trim();
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      if (idx < 0 || idx >= list.length) return;
+      if (!name) {
+        showToast('名稱不可空白');
+        renderRouteList();
+        return;
+      }
+      if (list[idx].name === name) return;
+      list[idx].name = name;
+      list[idx].custom = true;
+      data[_routeDay] = list;
+      saveRoutes(data);
+    }
+
+    function setupRouteDrag(box) {
+      const rows = box.querySelectorAll('.route-row');
+      rows.forEach(function (row) {
+        const handle = row.querySelector('.route-handle');
+        if (!handle) return;
+        handle.addEventListener('pointerdown', function (e) {
+          e.preventDefault();
+          const from = parseInt(row.getAttribute('data-idx'), 10);
+          _routeDrag = { from: from, el: row };
+          row.style.opacity = '0.7';
+          row.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)';
+          handle.setPointerCapture(e.pointerId);
+        });
+        handle.addEventListener('pointermove', function (e) {
+          if (!_routeDrag || _routeDrag.el !== row) return;
+          const y = e.clientY;
+          let targetIdx = _routeDrag.from;
+          rows.forEach(function (other) {
+            const r = other.getBoundingClientRect();
+            const mid = r.top + r.height / 2;
+            const oi = parseInt(other.getAttribute('data-idx'), 10);
+            if (y < mid && oi < targetIdx) targetIdx = oi;
+            if (y > mid && oi > targetIdx) targetIdx = oi;
+          });
+          // visual: find which row we're over
+          let overIdx = _routeDrag.from;
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i].getBoundingClientRect();
+            if (y >= r.top && y <= r.bottom) {
+              overIdx = parseInt(rows[i].getAttribute('data-idx'), 10);
+              break;
+            }
+          }
+          _routeDrag.over = overIdx;
+        });
+        handle.addEventListener('pointerup', function (e) {
+          if (!_routeDrag || _routeDrag.el !== row) return;
+          row.style.opacity = '';
+          row.style.boxShadow = '';
+          const from = _routeDrag.from;
+          const to = (_routeDrag.over != null) ? _routeDrag.over : from;
+          _routeDrag = null;
+          if (from !== to) reorderRouteItem(from, to);
+          else renderRouteList();
+        });
+        handle.addEventListener('pointercancel', function () {
+          if (_routeDrag && _routeDrag.el === row) {
+            row.style.opacity = '';
+            row.style.boxShadow = '';
+            _routeDrag = null;
+          }
+        });
+      });
+    }
+
+    function reorderRouteItem(from, to) {
+      const data = loadRoutes();
+      const list = data[_routeDay] || [];
+      if (from < 0 || to < 0 || from >= list.length || to >= list.length) {
+        renderRouteList();
+        return;
+      }
+      const item = list.splice(from, 1)[0];
+      list.splice(to, 0, item);
+      data[_routeDay] = list;
+      saveRoutes(data);
+      renderRouteList();
     }
     function addRouteFromStore() {
       const sid = $('routeAddStoreSelect') && $('routeAddStoreSelect').value;
@@ -5405,19 +5496,80 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       selectRouteDay(_routeDay);
       showToast('已移除 ' + name);
     }
-    function moveRouteItem(idx, dir) {
-      const data = loadRoutes();
-      const list = data[_routeDay] || [];
-      const j = idx + dir;
-      if (j < 0 || j >= list.length) return;
-      const tmp = list[idx];
-      list[idx] = list[j];
-      list[j] = tmp;
-      data[_routeDay] = list;
-      saveRoutes(data);
-      renderRouteList();
-    }
     // 以店舖管理的車期，產生當日行程初稿（只加未在名單的店）
+    function exportRoutePDF() {
+      const routes = loadRoutes();
+      let maxLen = 0;
+      for (let d = 1; d <= 6; d++) {
+        maxLen = Math.max(maxLen, (routes[d] || []).length);
+      }
+      if (maxLen === 0) {
+        showToast('行程表空白，無法匯出');
+        return;
+      }
+      const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
+      const dayNames = ['', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+      let head = '<tr>';
+      for (let d = 1; d <= 6; d++) {
+        head += '<th>' + dayNames[d] + '<br><span style="font-weight:400;font-size:10px;">' + (routes[d] || []).length + ' 戶</span></th>';
+      }
+      head += '</tr>';
+      let body = '';
+      for (let i = 0; i < maxLen; i++) {
+        body += '<tr>';
+        for (let d = 1; d <= 6; d++) {
+          const item = (routes[d] || [])[i];
+          const name = item ? (item.name || '') : '';
+          body += '<td>' + (name ? ('<span class="num">' + (i + 1) + '.</span> ' + name) : '') + '</td>';
+        }
+        body += '</tr>';
+      }
+      const html = `<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<title>週行程表 · 替車用</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; color: #222; margin: 16px; font-size: 11px; }
+  h1 { color: #E60012; font-size: 18px; margin: 0 0 4px; }
+  .meta { color: #666; font-size: 11px; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th { background: #E60012; color: #fff; padding: 8px 4px; text-align: center; font-size: 12px; vertical-align: middle; }
+  td { border: 1px solid #ddd; padding: 4px 5px; vertical-align: top; font-size: 10px; line-height: 1.35; word-break: break-word; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .num { color: #999; font-size: 9px; }
+  .note { margin-top: 12px; color: #666; font-size: 10px; }
+  button { background: #E60012; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 12px; }
+  @media print {
+    button { display: none; }
+    body { margin: 8px; }
+    th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  @page { size: A4 landscape; margin: 10mm; }
+</style>
+</head>
+<body>
+  <button onclick="window.print()">列印 / 儲存為 PDF</button>
+  <h1>存貨管理 · 週行程表</h1>
+  <div class="meta">給替車同事參考 · 產生時間：${genTime}</div>
+  <table>
+    <thead>${head}</thead>
+    <tbody>${body}</tbody>
+  </table>
+  <div class="note">備註：按順序到店；實際以當日現場安排為準。本表僅作行程參考。</div>
+</body>
+</html>`;
+      const w = window.open('', '_blank');
+      if (!w) {
+        showToast('請允許彈出視窗以匯出 PDF');
+        return;
+      }
+      w.document.write(html);
+      w.document.close();
+      showToast('已開啟行程表，請按「列印 / 儲存為 PDF」');
+    }
+
     function resetRoutesFromDefault() {
       if (!confirm('確定還原為圖表預設行程？現有行程會被覆蓋。')) return;
       const out = {};
