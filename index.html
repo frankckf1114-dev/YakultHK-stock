@@ -604,7 +604,6 @@
               <label><input type="checkbox" class="newVisitDay" value="4"> 四</label>
               <label><input type="checkbox" class="newVisitDay" value="5"> 五</label>
               <label><input type="checkbox" class="newVisitDay" value="6"> 六</label>
-              <label><input type="checkbox" class="newVisitDay" value="0"> 日</label>
             </div>
           </div>
           <button type="button" class="btn btn-primary" onclick="addStoreWithPwd()">新增店舖</button>
@@ -1061,7 +1060,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       const sorted = STORES.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-HK'));
       box.innerHTML = sorted.map(s => {
-        const days = (s.visitDays || []).map(d => DAY_NAMES[d]).join('');
+        const days = (s.visitDays || []).filter(d => d >= 1 && d <= 6).map(d => DAY_NAMES[d]).join('');
         const pids = getStoreProductIds(s.id);
         const pNames = pids.map(id => {
           const p = getProductById(id);
@@ -1151,7 +1150,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       const visitDays = [];
       document.querySelectorAll('.newVisitDay:checked').forEach(cb => {
-        visitDays.push(parseInt(cb.value, 10));
+        const d = parseInt(cb.value, 10);
+        if (d >= 1 && d <= 6) visitDays.push(d);
       });
       if (!visitDays.length) {
         showToast('請至少選擇一個車期');
@@ -3259,7 +3259,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     function formatVisitDaysLabel(storeId) {
       const days = getStoreVisitDays(storeId);
       // 明確顯示：逢星期一、星期四
-      return '逢' + days.map(d => '星期' + DAY_NAMES[d]).join('、');
+      const wd = days.filter(d => d >= 1 && d <= 6);
+      return '逢' + wd.map(d => '星期' + DAY_NAMES[d]).join('、');
     }
 
     // 回傳下次到店：{ days, dateStr, weekLabel }
