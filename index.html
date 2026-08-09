@@ -1775,6 +1775,17 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       );
     }
 
+    // 保護：空白／近乎空白的資料包
+    function recordCountOf(payloadOrArr) {
+      if (!payloadOrArr) return 0;
+      if (Array.isArray(payloadOrArr)) return payloadOrArr.length;
+      if (Array.isArray(payloadOrArr.records)) return payloadOrArr.records.length;
+      return 0;
+    }
+    function isEmptyRecordsPayload(payload) {
+      return recordCountOf(payload) === 0;
+    }
+
     function buildSyncPayload() {
       const s = getSyncSettings();
       return {
@@ -1798,15 +1809,28 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), payload.deletedKeys));
       }
       const local = loadData();
-      const merged = mergeRecords(local, payload.records || []);
+      const remoteRecs = payload.records || [];
+      // ★ 保護：雲端無記錄、本機有記錄 → 絕不把本機清空
+      if (remoteRecs.length === 0 && local.length > 0) {
+        // 只合併 tombstone，唔動 records
+      } else {
+        const merged = mergeRecords(local, remoteRecs);
+        localStorage.setItem('yakult_records', JSON.stringify(merged));
+      }
       const before = local.length;
-      localStorage.setItem('yakult_records', JSON.stringify(merged));
+      const after = loadData().length;
+
       if (payload.schedule && typeof payload.schedule === 'object') {
         const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
         const localAt = localStorage.getItem('yakult_schedule_updated_at') || '';
-        // 本機較新（剛改轉價日）唔俾雲端舊資料蓋過
-        if (!localAt || (remoteAt && remoteAt > localAt)) {
-          // 正規化為多段格式後再存
+        const remoteSchedEmpty = !payload.schedule || Object.keys(payload.schedule).length === 0;
+        const localSchedRaw = localStorage.getItem('yakult_scheduled_prices');
+        let localSchedHas = false;
+        try { localSchedHas = localSchedRaw && Object.keys(JSON.parse(localSchedRaw)).length > 0; } catch (e) {}
+        // 雲端空白轉價唔好蓋過本機
+        if (remoteSchedEmpty && localSchedHas) {
+          /* skip */
+        } else if (!localAt || (remoteAt && remoteAt > localAt)) {
           localStorage.setItem('yakult_scheduled_prices', JSON.stringify(normalizeScheduleData(payload.schedule)));
           if (remoteAt) localStorage.setItem('yakult_schedule_updated_at', remoteAt);
         }
@@ -1814,7 +1838,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if (payload.expiry && typeof payload.expiry === 'object') {
         const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
         const localAt = localStorage.getItem('yakult_expiry_updated_at') || '';
-        if (!localAt || (remoteAt && remoteAt > localAt)) {
+        const remoteExpEmpty = Object.keys(payload.expiry).length === 0;
+        const localExpRaw = localStorage.getItem('yakult_expiry_by_date');
+        let localExpHas = false;
+        try { localExpHas = localExpRaw && Object.keys(JSON.parse(localExpRaw)).length > 0; } catch (e) {}
+        if (remoteExpEmpty && localExpHas) {
+          /* skip */
+        } else if (!localAt || (remoteAt && remoteAt > localAt)) {
           localStorage.setItem('yakult_expiry_by_date', JSON.stringify(payload.expiry));
           if (remoteAt) localStorage.setItem('yakult_expiry_updated_at', remoteAt);
         }
@@ -1822,29 +1852,45 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       if (Array.isArray(payload.storeDiscountLogs)) {
         const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
         const localAt = localStorage.getItem('yakult_store_discount_logs_at') || '';
-        if (!localAt || (remoteAt && remoteAt > localAt)) {
+        if (payload.storeDiscountLogs.length === 0 && loadStoreDiscountLogs().length > 0) {
+          /* skip empty remote */
+        } else if (!localAt || (remoteAt && remoteAt > localAt)) {
           saveStoreDiscountLogs(payload.storeDiscountLogs);
           if (remoteAt) localStorage.setItem('yakult_store_discount_logs_at', remoteAt);
         }
       }
-      // 地區／店舖：以較新時間為準
+      // 地區／店舖：以較新時間為準；但雲端空白唔蓋本機有店
       const remoteAt = (payload.meta && payload.meta.updatedAt) ? payload.meta.updatedAt : '';
       const localAt = localStorage.getItem('yakult_stores_updated_at') || '';
       if (!localAt || (remoteAt && remoteAt > localAt)) {
+        let remoteStoreCount = 0;
         if (payload.regions && payload.regions.regions) {
-          regionsData = payload.regions;
-          saveRegionsData(regionsData);
-          STORES = loadStoresList();
-          if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+          Object.keys(payload.regions.regions).forEach(function (id) {
+            const r = payload.regions.regions[id];
+            remoteStoreCount += (r.stores && r.stores.length) || 0;
+          });
         } else if (Array.isArray(payload.stores)) {
-          STORES = payload.stores.map(s => ensureStoreProductIds(Object.assign({}, s)));
-          saveStoresList();
+          remoteStoreCount = payload.stores.length;
         }
-        if (remoteAt) localStorage.setItem('yakult_stores_updated_at', remoteAt);
-        if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
-        if (typeof renderStoreManageList === 'function') renderStoreManageList();
+        const localStoreCount = (STORES && STORES.length) || 0;
+        if (remoteStoreCount === 0 && localStoreCount > 0) {
+          /* 保留本機店舖 */
+        } else {
+          if (payload.regions && payload.regions.regions) {
+            regionsData = payload.regions;
+            saveRegionsData(regionsData);
+            STORES = loadStoresList();
+            if (typeof refreshRegionSelect === 'function') refreshRegionSelect();
+          } else if (Array.isArray(payload.stores)) {
+            STORES = payload.stores.map(s => ensureStoreProductIds(Object.assign({}, s)));
+            saveStoresList();
+          }
+          if (remoteAt) localStorage.setItem('yakult_stores_updated_at', remoteAt);
+          if (typeof refreshStoreDropdowns === 'function') refreshStoreDropdowns();
+          if (typeof renderStoreManageList === 'function') renderStoreManageList();
+        }
       }
-      return merged.length - before;
+      return after - before;
     }
 
     // showMsg: 顯示 toast；pullOnly: 只下載；preferPush: 儲存後優先確保上傳
@@ -1903,15 +1949,20 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         }
 
         const countBefore = loadData().length;
+        const remoteRecCount = recordCountOf(remotePayload);
         if (remotePayload) {
-          // preferPush：只合併記錄，到期日／轉價以本機為準（例如剛清除）
+          // preferPush：本機為準；仍合併 tombstone
           if (preferPush) {
-            // 本機記錄為準（刪除唔好被雲端加返）；仍合併 tombstone
             if (remotePayload.deletedKeys && typeof remotePayload.deletedKeys === 'object') {
               saveDeletedKeys(mergeDeletedKeys(loadDeletedKeys(), remotePayload.deletedKeys));
             }
           } else {
-            applyRemotePayload(remotePayload);
+            // ★ 雲端空白、本機有資料 → 唔套用雲端記錄（避免被清空）
+            if (remoteRecCount === 0 && countBefore > 0) {
+              if (showMsg) showToast('雲端無記錄，已保留本機資料');
+            } else {
+              applyRemotePayload(remotePayload);
+            }
           }
         }
         const countAfter = loadData().length;
@@ -1919,50 +1970,65 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (remoteNewer) _lastRemoteStamp = remoteStamp;
 
         // 2) 上傳本機（已合併）資料
+        // ★ 保護：本機空白但雲端有記錄 → 禁止上傳，以免清空雲端
         if (!pullOnly) {
           const out = buildSyncPayload();
-          const bodyObj = {
-            team_code: teamRaw,
-            payload: out,
-            updated_at: new Date().toISOString()
-          };
-          const body = JSON.stringify(bodyObj);
+          const localRecCount = recordCountOf(out);
+          if (localRecCount === 0 && remoteRecCount > 0) {
+            if (status) status.textContent = '已跳過上傳：本機無記錄，保留雲端 ' + remoteRecCount + ' 筆';
+            if (showMsg) showToast('本機無記錄，已跳過上傳（避免清空雲端）');
+            // 若雲端有資料、本機空，改為只拉落本機
+            if (remotePayload && remoteRecCount > 0 && countAfter === 0) {
+              applyRemotePayload(remotePayload);
+              if (showMsg) showToast('已從雲端還原 ' + recordCountOf(remotePayload) + ' 筆記錄');
+              if (typeof renderHistory === 'function') { try { renderHistory(); } catch (e) {} }
+            }
+          } else {
+            const bodyObj = {
+              team_code: teamRaw,
+              payload: out,
+              updated_at: new Date().toISOString()
+            };
+            const body = JSON.stringify(bodyObj);
 
-          let putRes = null;
-          // 列已存在：優先 PATCH（較可靠更新 payload）
-          if (rows && rows.length) {
-            putRes = await fetch(
-              base + '/rest/v1/inventory_sync?team_code=eq.' + team,
-              {
-                method: 'PATCH',
-                headers: Object.assign({}, headers, { 'Prefer': 'return=minimal' }),
-                body: JSON.stringify({ payload: out, updated_at: bodyObj.updated_at })
-              }
-            );
-          }
-          if (!putRes || !putRes.ok) {
-            putRes = await fetch(
-              base + '/rest/v1/inventory_sync?on_conflict=team_code',
-              {
+            let putRes = null;
+            if (rows && rows.length) {
+              putRes = await fetch(
+                base + '/rest/v1/inventory_sync?team_code=eq.' + team,
+                {
+                  method: 'PATCH',
+                  headers: Object.assign({}, headers, { 'Prefer': 'return=minimal' }),
+                  body: JSON.stringify({ payload: out, updated_at: bodyObj.updated_at })
+                }
+              );
+            }
+            if (!putRes || !putRes.ok) {
+              putRes = await fetch(
+                base + '/rest/v1/inventory_sync?on_conflict=team_code',
+                {
+                  method: 'POST',
+                  headers: Object.assign({}, headers, {
+                    'Prefer': 'resolution=merge-duplicates,return=minimal'
+                  }),
+                  body
+                }
+              );
+            }
+            if (!putRes.ok) {
+              putRes = await fetch(base + '/rest/v1/inventory_sync', {
                 method: 'POST',
-                headers: Object.assign({}, headers, {
-                  'Prefer': 'resolution=merge-duplicates,return=minimal'
-                }),
+                headers: Object.assign({}, headers, { 'Prefer': 'return=minimal' }),
                 body
-              }
-            );
+              });
+            }
+            if (!putRes.ok) {
+              const errText = await putRes.text();
+              throw new Error('上傳HTTP' + putRes.status + ' ' + errText.slice(0, 120));
+            }
+            if (showMsg) showToast('已同步到雲端');
           }
-          if (!putRes.ok) {
-            putRes = await fetch(base + '/rest/v1/inventory_sync', {
-              method: 'POST',
-              headers: Object.assign({}, headers, { 'Prefer': 'return=minimal' }),
-              body
-            });
-          }
-          if (!putRes.ok) {
-            const errText = await putRes.text();
-            throw new Error('上傳HTTP' + putRes.status + ' ' + errText.slice(0, 120));
-          }
+        } else {
+          if (showMsg) showToast('已從雲端更新');
         }
 
         const now = new Date();
@@ -1972,10 +2038,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         localStorage.setItem('yakult_sync_last', label);
         localStorage.setItem('yakult_sync_last_ok', '1');
         updateSyncStatusText();
-        if (showMsg) showToast(pullOnly ? '已從雲端更新' : '已同步到雲端');
         if (pullOnly && remoteNewer) {
-          if (countAfter !== countBefore) showToast('已收到同事的最新記錄');
-          else showToast('雲端資料已更新');
+          if (loadData().length !== countBefore) showToast('已收到同事的最新記錄');
+          else if (showMsg) showToast('雲端資料已更新');
         }
         if (typeof renderHistory === 'function') { try { renderHistory(); } catch (e) {} }
       } catch (e) {
