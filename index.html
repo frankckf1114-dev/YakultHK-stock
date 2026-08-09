@@ -611,9 +611,6 @@
       </div>
       <div class="card">
         <div class="card-title">📅 預計轉價（按集團）</div>
-        <p style="font-size:0.85rem; color:var(--muted); margin-bottom:12px;">
-          預先輸入各集團的新價錢及生效日。到達該日期後，選擇該集團店舖時會自動帶出。
-        </p>
         <div style="margin-bottom:10px;">
           <label>生效日期</label>
           <input type="date" id="scheduleEffectiveDate">
@@ -668,16 +665,8 @@
       </div>
       <div class="card">
         <div class="card-title">通知</div>
-        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:10px;">
-          短到期提示會在 App 內顯示。若允許系統通知，選店時可額外彈出提醒（iPhone 限制較多）。
-        </p>
         <button class="btn btn-secondary" style="margin-bottom:16px;" onclick="requestNotifyPermission()">開啟系統通知權限</button>
         <div class="card-title">區內資料同步</div>
-        <p style="font-size:0.85rem; color:var(--muted); margin-bottom:10px; line-height:1.5;">
-          資料會上<strong>雲端</strong>。儲存後會自動上傳；對方 App 開著時約 <strong>5 秒</strong>更新，亦可按「立即同步」。<br>
-          雙方須填<strong>相同同步碼</strong>。本機仍保留一份，可離線先記、有網再同步。<br>
-          <strong style="color:#c62828;">保護：</strong>雲端空白唔會覆蓋本機；本機空白亦唔會上傳清空雲端。
-        </p>
         <div style="margin-bottom:8px;">
           <label>啟用同步</label>
           <select id="syncEnabled">
@@ -4166,7 +4155,7 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
         });
         const histProds = PRODUCTS.filter(p => idSet[p.id]);
         let hasAny = false;
-        const stocks = [], salesArr = [], orders = [], totals = [], prices = [];
+        const stocks = [], salesArr = [], orders = [], totals = [], priceMap = {};
         histProds.forEach(p => {
           const pr = (r.products && r.products[p.id]) || {};
           const stock = pr.stock != null && pr.stock !== '' ? Number(pr.stock) : null;
@@ -4184,18 +4173,27 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
           salesArr.push(sales != null ? sales : '—');
           orders.push(order != null ? order : '—');
           totals.push(total != null ? total : '—');
-          prices.push(pr.price != null ? formatPriceLabel(p.id, pr.price) : '—');
+          priceMap[p.id] = pr.price != null ? formatPriceLabel(p.id, pr.price) : '—';
         });
         let table = '';
         if (hasAny && histProds.length) {
+          const salesCells = histProds.map((p, i) => {
+            const v = salesArr[i];
+            const priceLabel = priceMap[p.id] || '—';
+            // 點銷量顯示價錢
+            return '<td class="hist-sales-cell" style="color:var(--primary);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" ' +
+              'onclick="event.stopPropagation();showHistPricePopup(this,\'' +
+              String(productShortCode(p.id)).replace(/'/g, '') + '\',\'' +
+              String(priceLabel).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')" ' +
+              'title="點擊查看價錢">' + v + '</td>';
+          }).join('');
           table = '<table class="hist-table"><thead><tr><th></th>' +
             histProds.map(p => '<th>' + productShortCode(p.id) + '</th>').join('') +
             '</tr></thead><tbody>' +
-            '<tr><td class="row-label">銷量</td>' + salesArr.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
+            '<tr><td class="row-label">銷量</td>' + salesCells + '</tr>' +
             '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">落貨</td>' + orders.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr class="total-row"><td class="row-label">合計</td>' + totals.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
-            '<tr><td class="row-label">價錢</td>' + prices.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '</tbody></table>';
         } else {
           table = '（無詳細資料）';
@@ -4222,6 +4220,35 @@ lines.push('<div style="font-weight:600;margin-bottom:6px;">④ 到期日／新�
       if ($('historyDateFilter')) $('historyDateFilter').value = '';
       renderHistory();
     }
+
+    // 歷史：點銷量 → 小視窗顯示價錢
+    function showHistPricePopup(el, shortCode, priceLabel) {
+      let tip = document.getElementById('histPriceTip');
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'histPriceTip';
+        tip.style.cssText = 'position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:10px;' +
+          'box-shadow:0 6px 20px rgba(0,0,0,0.15);padding:10px 14px;font-size:0.9rem;max-width:80vw;';
+        document.body.appendChild(tip);
+      }
+      tip.innerHTML = '<div style="font-weight:700;color:var(--primary);margin-bottom:4px;">' + shortCode + '</div>' +
+        '<div>價錢：<strong>' + priceLabel + '</strong></div>' +
+        '<div style="margin-top:8px;text-align:right;"><button type="button" class="btn btn-secondary" style="width:auto;padding:4px 12px;font-size:0.8rem;" onclick="hideHistPriceTip()">關閉</button></div>';
+      tip.style.display = 'block';
+      const rect = el.getBoundingClientRect();
+      let top = rect.bottom + 8;
+      let left = rect.left + rect.width / 2 - 70;
+      if (left < 8) left = 8;
+      if (left + 160 > window.innerWidth - 8) left = window.innerWidth - 168;
+      if (top + 100 > window.innerHeight - 8) top = rect.top - 100;
+      tip.style.top = top + 'px';
+      tip.style.left = left + 'px';
+    }
+    function hideHistPriceTip() {
+      const tip = document.getElementById('histPriceTip');
+      if (tip) tip.style.display = 'none';
+    }
+    document.addEventListener('click', function () { hideHistPriceTip(); });
 
     function loadRecordToForm(storeId, date) {
       $('storeSelect').value = storeId;
