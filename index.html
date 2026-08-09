@@ -5583,7 +5583,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       showToast('開啟導航：' + (name || dest));
     }
 
-    function updateNextStopUI() {
+    function updateNextStopUI(panToStop) {
       const el = $('mapRouteNext');
       if (!el) return;
       if (!_mapRoutePoints.length) {
@@ -5602,9 +5602,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const rows = legend.querySelectorAll('[data-nav-idx]');
         rows.forEach(function (row) {
           const idx = parseInt(row.getAttribute('data-nav-idx'), 10);
-          row.style.background = (idx === _mapNextIdx) ? '#fff3f3' : 'transparent';
-          row.style.fontWeight = (idx === _mapNextIdx) ? '700' : '400';
+          const on = (idx === _mapNextIdx);
+          row.style.background = on ? '#fff3f3' : 'transparent';
+          row.style.fontWeight = on ? '700' : '400';
+          if (on) {
+            try { row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+          }
         });
+      }
+      // 地圖移到所選站點
+      if (panToStop !== false && _mapRoute && _mapRoute.map && p.lat != null && p.lng != null) {
+        try {
+          const z = Math.max(_mapRoute.map.getZoom(), 16);
+          _mapRoute.map.setView([p.lat, p.lng], z, { animate: true });
+          if (_mapRoute.markers && _mapRoute.markers[_mapNextIdx]) {
+            _mapRoute.markers[_mapNextIdx].openPopup();
+          }
+        } catch (e) {}
       }
     }
 
@@ -5693,6 +5707,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap'
         }).addTo(map);
+        const markers = [];
         points.forEach(function (p, idx) {
           const icon = L.divIcon({
             className: '',
@@ -5701,6 +5716,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
             iconAnchor: [14, 14]
           });
           const mk = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
+          markers.push(mk);
           const safeName = String(p.name).replace(/</g, '&lt;').replace(/'/g, '&#39;');
           mk.bindPopup(
             '<div style="min-width:140px;"><strong>' + p.i + '. ' + safeName + '</strong><br>' +
@@ -5709,15 +5725,16 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           );
           mk.on('click', function () {
             _mapNextIdx = idx;
-            updateNextStopUI();
+            updateNextStopUI(true);
           });
         });
         const bounds = L.latLngBounds(points.map(function (p) { return [p.lat, p.lng]; }));
         map.fitBounds(bounds.pad(0.15));
-        _mapRoute = { map: map, meMarker: null, meCircle: null };
+        _mapRoute = { map: map, meMarker: null, meCircle: null, markers: markers };
         setTimeout(function () {
           map.invalidateSize();
           startMyLocationWatch(false);
+          updateNextStopUI(true);
         }, 200);
       }, 50);
     }
