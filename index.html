@@ -574,7 +574,8 @@
       <div style="background:#fff;margin:auto 0 0;border-radius:16px 16px 0 0;max-height:94vh;display:flex;flex-direction:column;width:100%;">
         <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;gap:6px;flex-wrap:wrap;">
           <div style="font-weight:700;color:var(--primary);font-size:0.95rem;flex:1;min-width:100px;" id="mapRouteTitle">地圖行程</div>
-          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#E60012;" onclick="navToNextStop()">下一站導航</button>
+          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#E60012;" onclick="navToNextStop()">導航</button>
+          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="advanceNextStop()">下一站</button>
           <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#1565c0;" onclick="recenterMyLocation()">📍 我</button>
           <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="closeRouteMapView()">關閉</button>
         </div>
@@ -5617,14 +5618,18 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       const p = _mapRoutePoints[_mapNextIdx];
+      // 只在按「下一站導航」時才開啟手機地圖
       openNavTo(p.lat, p.lng, p.name);
-      // 導航後推進到下一站（方便連續使用）
+    }
+    function advanceNextStop() {
+      if (!_mapRoutePoints.length) return;
       if (_mapNextIdx < _mapRoutePoints.length - 1) {
         _mapNextIdx++;
         updateNextStopUI();
       } else {
         _mapNextIdx = _mapRoutePoints.length;
         updateNextStopUI();
+        showToast('今日行程已完成');
       }
     }
 
@@ -5664,11 +5669,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       if ($('mapRouteLegend')) {
         $('mapRouteLegend').innerHTML = points.map(function (p, idx) {
-          return '<div data-nav-idx="' + idx + '" style="padding:6px 4px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;cursor:pointer;" ' +
-            'onclick="openNavTo(' + p.lat + ',' + p.lng + ',\'' + String(p.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\');_mapNextIdx=' + idx + ';updateNextStopUI();">' +
+          const safeJs = String(p.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          return '<div data-nav-idx="' + idx + '" style="padding:6px 4px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;" ' +
+            'onclick="_mapNextIdx=' + idx + ';updateNextStopUI();">' +
             '<strong style="color:var(--primary);min-width:1.5em;">' + p.i + '</strong>' +
             '<span style="flex:1;">' + String(p.name).replace(/</g, '&lt;') + '</span>' +
-            '<span style="color:#1565c0;font-size:0.75rem;">導航</span></div>';
+            '<button type="button" class="btn btn-primary" style="width:auto;padding:4px 10px;font-size:0.75rem;background:#1565c0;" ' +
+            'onclick="event.stopPropagation();openNavTo(' + p.lat + ',' + p.lng + ',\'' + safeJs + '\')">導航</button></div>';
         }).join('');
       }
       updateNextStopUI();
