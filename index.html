@@ -545,7 +545,7 @@
             <input type="text" id="routeAddCustomName" placeholder="輸入戶口名稱後新增" autocomplete="off" style="flex:1;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();addRouteCustom();}">
             <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">＋ 新增</button>
           </div>
-          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRoutePDF()">📄 匯出行程 PDF</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRoutePDF()">📄 匯出當日行程 PDF</button>
         </div>
       </div>
     </div>
@@ -6069,68 +6069,56 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
     // 以店舖管理的車期，產生當日行程初稿（只加未在名單的店）
     function exportRoutePDF() {
-      const routes = loadRoutes();
-      let maxLen = 0;
-      for (let d = 1; d <= 6; d++) {
-        maxLen = Math.max(maxLen, (routes[d] || []).length);
-      }
-      if (maxLen === 0) {
-        showToast('行程表空白，無法匯出');
+      const day = _routeDay || 1;
+      const list = loadRoutes()[day] || [];
+      if (!list.length) {
+        showToast('此日沒有行程，請先選擇有戶口的日子');
         return;
       }
       const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
-      const dayNames = ['', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
-      let head = '<tr>';
-      for (let d = 1; d <= 6; d++) {
-        head += '<th>' + dayNames[d] + '<br><span style="font-weight:400;font-size:10px;">' + (routes[d] || []).length + ' 戶</span></th>';
-      }
-      head += '</tr>';
+      const dayLabel = '星期' + DAY_NAMES[day];
       let body = '';
-      for (let i = 0; i < maxLen; i++) {
-        body += '<tr>';
-        for (let d = 1; d <= 6; d++) {
-          const item = (routes[d] || [])[i];
-          const name = item ? (item.name || '') : '';
-          body += '<td>' + (name ? ('<span class="num">' + (i + 1) + '.</span> ' + name) : '') + '</td>';
-        }
-        body += '</tr>';
-      }
+      list.forEach(function (item, i) {
+        const name = (item && item.name) ? item.name : '';
+        body += '<tr><td class="n">' + (i + 1) + '</td><td class="name">' + name.replace(/</g, '&lt;') + '</td></tr>';
+      });
       const html = `<!DOCTYPE html>
 <html lang="zh-HK">
 <head>
 <meta charset="UTF-8">
-<title>週行程表</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${dayLabel} 行程</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; color: #222; margin: 16px; font-size: 11px; }
-  h1 { color: #E60012; font-size: 18px; margin: 0 0 4px; }
-  .meta { color: #666; font-size: 11px; margin-bottom: 12px; }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  th { background: #E60012; color: #fff; padding: 6px 3px; text-align: center; font-size: 11px; vertical-align: middle; white-space: nowrap; }
-  td { border: 1px solid #ddd; padding: 3px 4px; vertical-align: middle; font-size: 9px; line-height: 1.25;
-       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body { font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; color: #222; margin: 16px; font-size: 16px; }
+  h1 { color: #E60012; font-size: 22px; margin: 0 0 6px; }
+  .meta { color: #666; font-size: 13px; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #E60012; color: #fff; padding: 12px 10px; text-align: left; font-size: 15px; }
+  td { border-bottom: 1px solid #eee; padding: 12px 10px; font-size: 16px; line-height: 1.4;
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  td.n { width: 48px; color: #E60012; font-weight: 700; font-size: 16px; }
+  td.name { font-size: 16px; }
   tr:nth-child(even) td { background: #fafafa; }
-  .num { color: #999; font-size: 8px; }
-  .note { margin-top: 12px; color: #666; font-size: 10px; }
-  button { background: #E60012; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 12px; }
+  .note { margin-top: 14px; color: #888; font-size: 12px; }
+  button { background: #E60012; color: #fff; border: none; padding: 12px 20px; border-radius: 10px; font-size: 16px; cursor: pointer; margin-bottom: 14px; width: 100%; }
   @media print {
     button { display: none; }
-    body { margin: 6px; font-size: 9px; }
-    td { font-size: 8px; padding: 2px 3px; }
-    th { font-size: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { margin: 12px; }
+    th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
-  @page { size: A4 landscape; margin: 8mm; }
+  @page { size: A4 portrait; margin: 12mm; }
 </style>
 </head>
 <body>
   <button onclick="window.print()">列印 / 儲存為 PDF</button>
-  <h1>存貨管理 · 週行程表</h1>
-  <div class="meta">產生時間：${genTime}</div>
+  <h1>${dayLabel} 行程</h1>
+  <div class="meta">${list.length} 戶　·　產生時間：${genTime}</div>
   <table>
-    <thead>${head}</thead>
+    <thead><tr><th>#</th><th>戶口</th></tr></thead>
     <tbody>${body}</tbody>
   </table>
-  <div class="note">備註：按順序到店；實際以當日現場安排為準。本表僅作行程參考。</div>
+  <div class="note">按編號順序到店。</div>
 </body>
 </html>`;
       const w = window.open('', '_blank');
@@ -6140,7 +6128,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       w.document.write(html);
       w.document.close();
-      showToast('已開啟行程表，請按「列印 / 儲存為 PDF」');
+      showToast('已匯出「' + dayLabel + '」行程');
     }
 
     function resetRoutesFromDefault() {
