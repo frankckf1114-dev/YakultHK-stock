@@ -533,7 +533,14 @@
           <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#2e7d32;" onclick="openRouteMapView()">🗺️ 地圖</button>
         </div>
         <div id="routeList" style="font-size:0.85rem;margin-bottom:12px;"></div>
-        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px;">
+        <div id="routeSelectedBar" style="display:none;border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px;">
+          <div id="routeSelectedLabel" style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;"></div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn btn-secondary" style="flex:1;" onclick="editSelectedRouteItem()">修改名稱</button>
+            <button type="button" class="btn" style="flex:1;background:#dc3545;color:#fff;" onclick="removeSelectedRouteItem()">刪除</button>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" id="routeAddCustomName" placeholder="輸入戶口名稱後新增" autocomplete="off" style="flex:1;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();addRouteCustom();}">
             <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">＋ 新增</button>
@@ -5357,6 +5364,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
     function selectRouteDay(day) {
       _routeDay = day;
+      _routeSelectedIdx = -1;
       document.querySelectorAll('.route-day-btn').forEach(function (btn) {
         const d = parseInt(btn.getAttribute('data-day'), 10);
         if (d === day) {
@@ -5388,12 +5396,17 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
     let _routeDrag = null; // { from, el }
 
+    let _routeSelectedIdx = -1;
+
     function renderRouteList() {
       const box = $('routeList');
       if (!box) return;
       const list = loadRoutes()[_routeDay] || [];
+      if (_routeSelectedIdx >= list.length) _routeSelectedIdx = -1;
       if (!list.length) {
         box.innerHTML = '<div style="color:var(--muted);">尚未加入戶口</div>';
+        _routeSelectedIdx = -1;
+        updateRouteSelectedBar();
         return;
       }
       const coords = loadRouteCoords();
@@ -5402,19 +5415,57 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const safe = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const c = getItemCoords(item, coords);
         const hasPin = !!c;
+        const selected = (i === _routeSelectedIdx);
         const mapBtnStyle = hasPin
           ? 'width:auto;padding:4px 8px;font-size:0.95rem;flex-shrink:0;background:#e8f5e9;border:1px solid #a5d6a7;'
           : 'width:auto;padding:4px 8px;font-size:0.95rem;flex-shrink:0;background:#f5f5f5;border:1px solid #ddd;opacity:0.85;';
-        return '<div class="route-row" data-idx="' + i + '" style="display:flex;align-items:center;gap:5px;padding:8px 0;border-bottom:1px solid #f0f0f0;background:#fff;">' +
+        const rowBg = selected ? '#fff3f3' : '#fff';
+        return '<div class="route-row" data-idx="' + i + '" onclick="selectRouteItem(' + i + ')" style="display:flex;align-items:center;gap:5px;padding:8px 0;border-bottom:1px solid #f0f0f0;background:' + rowBg + ';">' +
           '<span class="route-handle" title="拖動排序" style="cursor:grab;user-select:none;color:#999;font-size:1.05rem;padding:4px 4px;flex-shrink:0;touch-action:none;">☰</span>' +
           '<span style="width:1.3em;color:var(--muted);font-size:0.75rem;flex-shrink:0;">' + (i + 1) + '</span>' +
-          '<span style="flex:1;min-width:0;font-size:0.85rem;line-height:1.35;">' + safe + '</span>' +
-          '<button type="button" class="btn btn-secondary" title="' + (hasPin ? '已設位置' : '設定地圖位置') + '" style="' + mapBtnStyle + '" onclick="openMapPick(' + i + ')">🗺️</button>' +
-          '<button type="button" class="btn btn-secondary" style="width:auto;padding:4px 7px;font-size:0.72rem;flex-shrink:0;" onclick="editRouteItemName(' + i + ')">修</button>' +
-          '<button type="button" class="btn" style="width:auto;padding:4px 7px;font-size:0.72rem;background:#dc3545;color:#fff;flex-shrink:0;" onclick="removeRouteItem(' + i + ')">刪</button>' +
+          '<span style="flex:1;min-width:0;font-size:0.85rem;line-height:1.35;' + (selected ? 'font-weight:700;' : '') + '">' + safe + '</span>' +
+          '<button type="button" class="btn btn-secondary" title="' + (hasPin ? '已設位置' : '設定地圖位置') + '" style="' + mapBtnStyle + '" onclick="event.stopPropagation();openMapPick(' + i + ')">🗺️</button>' +
           '</div>';
       }).join('');
       setupRouteDrag(box);
+      updateRouteSelectedBar();
+    }
+
+    function selectRouteItem(idx) {
+      _routeSelectedIdx = (_routeSelectedIdx === idx) ? -1 : idx;
+      renderRouteList();
+    }
+
+    function updateRouteSelectedBar() {
+      const bar = $('routeSelectedBar');
+      const label = $('routeSelectedLabel');
+      if (!bar) return;
+      const list = loadRoutes()[_routeDay] || [];
+      if (_routeSelectedIdx < 0 || _routeSelectedIdx >= list.length) {
+        bar.style.display = 'none';
+        return;
+      }
+      const name = list[_routeSelectedIdx].name || '';
+      bar.style.display = 'block';
+      if (label) label.textContent = '已選：' + (_routeSelectedIdx + 1) + '. ' + name;
+    }
+
+    function editSelectedRouteItem() {
+      if (_routeSelectedIdx < 0) {
+        showToast('請先點選戶口');
+        return;
+      }
+      editRouteItemName(_routeSelectedIdx);
+    }
+
+    function removeSelectedRouteItem() {
+      if (_routeSelectedIdx < 0) {
+        showToast('請先點選戶口');
+        return;
+      }
+      const idx = _routeSelectedIdx;
+      _routeSelectedIdx = -1;
+      removeRouteItem(idx);
     }
 
     function editRouteItemName(idx) {
