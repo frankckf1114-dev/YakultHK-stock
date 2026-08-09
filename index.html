@@ -2471,16 +2471,18 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           const priceLines = PRODUCTS.map(p => {
             const v = e.prices && e.prices[p.id];
             if (v == null || v === '') return null;
-            const label = p.id === 'lt' ? 'LT' : p.name.replace('益力多', '').replace(/^\s+/, '');
+            // 完整名稱；左名右價，單行不換行
+            let label = p.name.replace('益力多', '').replace(/^\s+/, '');
+            if (p.id === 'lt') label = 'LT';
             const priceText = formatPriceLabel(p.id, v);
-            return '<div style="display:grid;grid-template-columns:4.8em 1fr;font-size:0.78rem;line-height:1.7;padding:1px 2px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;">' +
-              '<span>' + label + '</span>' +
-              '<span style="text-align:left;">' + priceText + '</span>' +
+            return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:0.8rem;line-height:1.8;padding:2px 0;white-space:nowrap;">' +
+              '<span style="flex:1;min-width:0;">' + label + '</span>' +
+              '<span style="flex-shrink:0;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;">' + priceText + '</span>' +
               '</div>';
           }).filter(Boolean).join('');
           html += '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
-            '<div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
-            '<div><strong>' + chain + '</strong>　' + (e.effectiveDate || '') + ' 起 ' + tag + '</div>' +
+            '<div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+            '<div style="white-space:nowrap;"><strong>' + chain + '</strong>　' + (e.effectiveDate || '') + ' 起 ' + tag + '</div>' +
             '<span style="display:flex;gap:6px;flex-shrink:0;">' +
             '<button type="button" class="btn btn-secondary" style="padding:4px 8px;font-size:0.75rem;width:auto;" onclick="editScheduleEntry(\'' + chain + '\',\'' + e.effectiveDate + '\')">修改</button>' +
             '<button type="button" class="btn" style="padding:4px 8px;font-size:0.75rem;width:auto;background:#dc3545;color:#fff;" onclick="deleteScheduleEntry(\'' + chain + '\',\'' + e.effectiveDate + '\')">刪除</button>' +
