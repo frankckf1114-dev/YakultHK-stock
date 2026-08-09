@@ -43,18 +43,18 @@
     header {
       background: #fff;
       color: var(--text);
-      padding: 10px 14px 0;
+      padding: 10px 14px 10px;
       position: sticky;
       top: 0;
       z-index: 100;
       box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+      border-bottom: 2px solid var(--primary);
     }
     header .header-top {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      padding-bottom: 10px;
     }
     header .brand-row {
       display: flex;
@@ -82,12 +82,12 @@
       letter-spacing: 0.04em;
       font-weight: 500;
     }
-    header .yakult-man {
-      width: 52px;
-      height: 52px;
+    header .yakult-brand-logo {
+      height: 40px;
+      width: auto;
+      max-width: 110px;
       object-fit: contain;
       flex-shrink: 0;
-      filter: drop-shadow(0 2px 4px rgba(230,0,18,0.15));
     }
     header .tagline {
       font-size: 0.65rem;
@@ -425,9 +425,8 @@
           <div class="subtitle">香港益力多 · 每日落貨記錄 · v3.0</div>
         </div>
       </div>
-      <img class="yakult-man" src="./yakult_man.png" alt="Yakult Man" width="52" height="52" onerror="this.style.display='none'">
+      <img class="yakult-brand-logo" src="./yakult_logo.png" alt="Yakult 益力多" onerror="this.style.display='none'">
     </div>
-    <div class="tagline">人も地球も健康に · 代田株のチカラ</div>
   </header>
 
   <div id="installBanner" class="card" style="display:none; margin:12px; background:#fff5f5; border:1px solid #ffc9c9;">
