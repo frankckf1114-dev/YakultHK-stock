@@ -238,6 +238,23 @@
       gap: 8px;
       margin-top: 12px;
     }
+    .btn-sm-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .btn-sm-row .btn-sm {
+      flex: 1;
+      width: auto !important;
+      min-width: 0;
+      padding: 8px 4px !important;
+      font-size: 0.78rem !important;
+      font-weight: 600;
+      letter-spacing: 0 !important;
+      white-space: nowrap !important;
+      border-radius: 8px !important;
+      line-height: 1.2;
+    }
     .tabs {
       display: flex;
       background: white;
@@ -526,10 +543,10 @@
           <select id="regionSelect" onchange="onRegionSelectChange()"></select>
         </div>
         <div id="regionCurrentLabel" style="font-size:0.85rem;color:var(--primary);font-weight:600;margin-bottom:8px;"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-          <button type="button" class="btn btn-primary" style="width:auto;flex:1;" onclick="addNewRegion()">新增地區</button>
-          <button type="button" class="btn btn-secondary" style="width:auto;flex:1;" onclick="renameCurrentRegion()">重新命名</button>
-          <button type="button" class="btn" style="width:auto;flex:1;background:#dc3545;color:#fff;" onclick="deleteCurrentRegion()">刪除地區</button>
+        <div class="btn-sm-row">
+          <button type="button" class="btn btn-primary btn-sm" onclick="addNewRegion()">新增</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="renameCurrentRegion()">改名</button>
+          <button type="button" class="btn btn-sm" style="background:#dc3545;color:#fff;" onclick="deleteCurrentRegion()">刪除</button>
         </div>
       </div>
       <div class="card">
