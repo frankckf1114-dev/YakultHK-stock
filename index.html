@@ -520,6 +520,10 @@
     <div id="page-route" class="hidden">
       <div class="card">
         <div class="card-title">週行程表</div>
+        <div style="margin-bottom:12px;">
+          <label>地區</label>
+          <select id="routeRegionSelect" onchange="onRouteRegionSelectChange()"></select>
+        </div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;" id="routeDayTabs">
           <button type="button" class="btn btn-secondary route-day-btn" data-day="1" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(1)">一</button>
           <button type="button" class="btn btn-secondary route-day-btn" data-day="2" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(2)">二</button>
@@ -547,6 +551,9 @@
           </div>
           <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRoutePDF()">📄 匯出當日行程 PDF</button>
           <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRouteImage()">🖼️ 匯出當日行程長圖</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRegionRoutesJSON()">💾 匯出本區行程資料</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="triggerImportRegionRoutes()">📥 匯入行程資料</button>
+          <input type="file" id="routeImportFile" accept="application/json,.json" class="hidden" style="display:none;" onchange="onRouteImportFile(event)">
         </div>
       </div>
     </div>
@@ -980,18 +987,32 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     let STORES = loadStoresList();
 
     function refreshRegionSelect() {
-      const sel = $('regionSelect');
-      if (!sel) return;
       const cur = regionsData.currentId;
-      sel.innerHTML = '';
-      Object.keys(regionsData.regions).forEach(function (id) {
-        const r = regionsData.regions[id];
-        const opt = document.createElement('option');
-        opt.value = id;
-        opt.textContent = (r.name || id) + '（' + ((r.stores && r.stores.length) || 0) + ' 間店）';
-        sel.appendChild(opt);
-      });
-      if (cur && regionsData.regions[cur]) sel.value = cur;
+      function fillSel(sel, withStoreCount) {
+        if (!sel) return;
+        sel.innerHTML = '';
+        Object.keys(regionsData.regions).forEach(function (id) {
+          const r = regionsData.regions[id];
+          const opt = document.createElement('option');
+          opt.value = id;
+          let routeCount = 0;
+          if (r.routes) {
+            for (let d = 1; d <= 6; d++) {
+              const arr = r.routes[d] || r.routes[String(d)] || [];
+              if (Array.isArray(arr)) routeCount += arr.length;
+            }
+          }
+          if (withStoreCount) {
+            opt.textContent = (r.name || id) + '（' + ((r.stores && r.stores.length) || 0) + ' 間店）';
+          } else {
+            opt.textContent = (r.name || id) + (routeCount ? '（行程 ' + routeCount + ' 戶）' : '（無行程）');
+          }
+          sel.appendChild(opt);
+        });
+        if (cur && regionsData.regions[cur]) sel.value = cur;
+      }
+      fillSel($('regionSelect'), true);
+      fillSel($('routeRegionSelect'), false);
       const label = $('regionCurrentLabel');
       if (label) {
         const r = getCurrentRegion();
@@ -1008,13 +1029,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       switchToRegion(sel.value);
     }
 
+    function onRouteRegionSelectChange() {
+      const sel = $('routeRegionSelect');
+      if (!sel || !sel.value) return;
+      if (sel.value === regionsData.currentId) return;
+      switchToRegion(sel.value);
+    }
+
     function switchToRegion(regionId) {
       if (!regionId || !regionsData.regions[regionId]) {
         showToast('找不到該地區');
         return;
       }
-      // 先把目前 STORES 寫回目前地區
+      // 先把目前 STORES／行程寫回目前地區
       saveStoresList();
+      try { saveRoutes(loadRoutes()); } catch (e) {}
       regionsData.currentId = regionId;
       saveRegionsData(regionsData);
       STORES = loadStoresList();
@@ -1023,6 +1052,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       renderStoreManageList();
       if ($('storeSelect')) $('storeSelect').value = '';
       if (typeof onStoreChange === 'function') onStoreChange();
+      _routeSelectedIdx = -1;
+      try {
+        if (typeof selectRouteDay === 'function') selectRouteDay(_routeDay || 1);
+        else if (typeof renderRouteList === 'function') renderRouteList();
+      } catch (e2) {}
       showToast('已切換至「' + (getCurrentRegion().name || '') + '」');
     }
 
@@ -1040,6 +1074,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         id: id,
         name: n,
         stores: [],
+        routes: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
+        routeCoords: {},
         updatedAt: new Date().toISOString()
       };
       regionsData.currentId = id;
@@ -3311,23 +3347,59 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // 從一組按日期排序的記錄中，抽出「相近價錢」期間的銷量
     function collectSalesAtPrice(records, prodId, targetPrice) {
-      const sales = [];
+      return collectSalesPeriodsAtPrice(records, prodId, targetPrice).map(function (p) { return p.sold; });
+    }
+
+    function collectSalesPeriodsAtPrice(records, prodId, targetPrice) {
+      const periods = [];
+      const minBuf = getMinBuffer(prodId);
       for (let i = 1; i < records.length; i++) {
         const prev = records[i - 1].products[prodId];
         const curr = records[i].products[prodId];
         if (!prev || prev.stock == null || !curr || curr.stock == null) continue;
-
-        // 該段銷售期的價錢：上一筆的價錢（落貨後至下次巡店的售價）
         const periodPrice = prev.price != null ? Number(prev.price) : null;
         if (periodPrice == null) continue;
         if (Math.abs(periodPrice - targetPrice) > 1.01) continue;
-
         const effectivePrev = getEffectiveStock(prev);
         if (effectivePrev == null) continue;
         const sold = effectivePrev - Number(curr.stock);
-        if (sold >= 0) sales.push(sold);
+        if (sold < 0) continue;
+        const d0 = new Date(records[i - 1].date + 'T12:00:00');
+        const d1 = new Date(records[i].date + 'T12:00:00');
+        const gapDays = Math.round((d1 - d0) / 86400000);
+        if (gapDays <= 0 || gapDays > 21) continue;
+        const endStock = Number(curr.stock);
+        const sellout = endStock <= 1 || endStock <= minBuf * 0.25;
+        periods.push({
+          sold: sold,
+          gapDays: gapDays,
+          sellout: sellout,
+          endStock: endStock,
+          startDate: records[i - 1].date,
+          endDate: records[i].date
+        });
       }
-      return sales;
+      return periods;
+    }
+
+    function getLastPeriodGap(storeId, dateStr) {
+      const recs = loadData()
+        .filter(function (r) { return r.storeId === storeId && r.date <= dateStr; })
+        .sort(function (a, b) { return a.date.localeCompare(b.date); });
+      if (recs.length < 2) return null;
+      // 若今天已有記錄，用倒數第二→最後；否則用最後一筆日期到今天
+      const last = recs[recs.length - 1];
+      const prev = recs[recs.length - 2];
+      if (last.date === dateStr) {
+        const d0 = new Date(prev.date + 'T12:00:00');
+        const d1 = new Date(last.date + 'T12:00:00');
+        const gap = Math.round((d1 - d0) / 86400000);
+        return gap > 0 ? gap : null;
+      }
+      const d0 = new Date(last.date + 'T12:00:00');
+      const d1 = new Date(dateStr + 'T12:00:00');
+      const gap = Math.round((d1 - d0) / 86400000);
+      return gap > 0 ? gap : null;
     }
 
     // 計算兩日之間（不含起日、含終日）有多少平日／周末
@@ -3417,7 +3489,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       };
     }
 
-    // 預計銷量：該店在相近售價下的歷史平均「每段到店間隔」銷量
+    // 預計銷量：同店同價歷史 → 加權日均（近期較重；賣清段上調）
     function getExpectedSalesByPrice(storeId, prodId, targetPrice, beforeDate) {
       if (targetPrice == null || isNaN(targetPrice)) return null;
 
@@ -3425,21 +3497,34 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         .filter(r => r.storeId === storeId && r.date < beforeDate)
         .sort((a, b) => a.date.localeCompare(b.date));
 
-      const sales = collectSalesAtPrice(storeRecs, prodId, targetPrice);
-      if (sales.length === 0) return null;
+      const periods = collectSalesPeriodsAtPrice(storeRecs, prodId, targetPrice);
+      if (periods.length === 0) return null;
 
-      const avg = sales.reduce((a, b) => a + b, 0) / sales.length;
-      // 平均每段間隔天數（有銷量的相鄰記錄）
-      let gapSum = 0, gapN = 0;
-      for (let i = 1; i < storeRecs.length; i++) {
-        const d0 = new Date(storeRecs[i - 1].date + 'T12:00:00');
-        const d1 = new Date(storeRecs[i].date + 'T12:00:00');
-        const gap = Math.round((d1 - d0) / 86400000);
-        if (gap > 0 && gap < 30) { gapSum += gap; gapN++; }
-      }
-      const avgGap = gapN > 0 ? gapSum / gapN : null;
+      // 只用最近最多 8 段，越近期權重越高
+      const recent = periods.slice(-8);
+      let wSum = 0, dailyW = 0, soldW = 0, gapW = 0;
+      recent.forEach(function (p, i) {
+        const w = (i + 1) * (i + 1); // 1,4,9... 近期明顯較重
+        let soldAdj = p.sold;
+        if (p.sellout) soldAdj = p.sold * 1.25; // 賣清：需求可能更高
+        const daily = soldAdj / Math.max(1, p.gapDays);
+        dailyW += daily * w;
+        soldW += soldAdj * w;
+        gapW += p.gapDays * w;
+        wSum += w;
+      });
+      const dailyRate = wSum > 0 ? dailyW / wSum : null;
+      const avg = wSum > 0 ? soldW / wSum : null;
+      const avgGap = wSum > 0 ? gapW / wSum : null;
       const dayProfile = analyzeWeekdayWeekendSales(storeId, prodId, targetPrice, beforeDate);
-      return { avg: avg, count: sales.length, avgGap: avgGap, dayProfile: dayProfile };
+      return {
+        avg: avg,
+        count: periods.length,
+        avgGap: avgGap,
+        dailyRate: dailyRate,
+        dayProfile: dayProfile,
+        recentCount: recent.length
+      };
     }
 
     // 取得店舖到訪星期（可被 localStorage 覆蓋）
@@ -3856,29 +3941,32 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       let dailyRate = null;
       let dayPatternNote = '';
       let dayProfile = null;
+      let histNote = '';
+
+      // 1) 剛結束這段：實際銷量 ÷ 實際間隔 → 日均（最貼近現況）
+      let justEndedDaily = null;
+      let lastSoldQty = null;
+      if (lastStock !== null && !isNaN(curStock)) {
+        lastSoldQty = Math.max(0, lastStock - curStock);
+        const lastGap = getLastPeriodGap(storeId, date) || daysNext;
+        justEndedDaily = lastSoldQty / Math.max(1, lastGap);
+        // 今日存貨已接近賣清 → 需求可能被低估
+        if (curStock <= 1 || curStock <= minBuf * 0.25) {
+          justEndedDaily *= 1.2;
+          histNote = '上段疑似賣清，需求已上調';
+        }
+      }
+
+      // 2) 同店同價歷史加權日均
+      let histDaily = null;
       if (targetPrice != null) {
         const expected = getExpectedSalesByPrice(storeId, prodId, targetPrice, date);
         if (expected && expected.count > 0) {
-          if (expected.avgGap && expected.avgGap > 0) {
-            dailyRate = expected.avg / expected.avgGap;
-            expectedUntilNext = dailyRate * daysNext;
-          } else {
-            expectedUntilNext = expected.avg * (daysNext / 3);
-            dailyRate = expected.avg / 3;
-          }
-          // 本店平日／周末差異：用下一段實際日曆組成加權
+          histDaily = (expected.dailyRate != null)
+            ? expected.dailyRate
+            : (expected.avgGap > 0 ? expected.avg / expected.avgGap : expected.avg / 3);
           dayProfile = expected.dayProfile;
           if (dayProfile && dayProfile.overallDaily != null) {
-            const nextDate = new Date(date + 'T12:00:00');
-            nextDate.setDate(nextDate.getDate() + daysNext);
-            const nextStr = formatLocalDate(nextDate);
-            const mix = countWeekdayWeekend(date, nextStr);
-            const wdD = dayProfile.weekdayDaily != null ? dayProfile.weekdayDaily : dayProfile.overallDaily;
-            const weD = dayProfile.weekendDaily != null ? dayProfile.weekendDaily : dayProfile.overallDaily;
-            if (mix.total > 0 && (dayProfile.pattern !== 'stable' || (mix.weekend > 0 && mix.weekday > 0))) {
-              expectedUntilNext = wdD * mix.weekday + weD * mix.weekend;
-              dailyRate = expectedUntilNext / mix.total;
-            }
             if (dayProfile.pattern === 'weekend') {
               dayPatternNote = '本店周末較好賣（約 ' + Math.round(dayProfile.ratio * 100) + '% 平日）';
             } else if (dayProfile.pattern === 'weekday') {
@@ -3889,10 +3977,36 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           }
         }
       }
-      if (expectedUntilNext == null && lastStock !== null && !isNaN(curStock)) {
-        const lastSold = Math.max(0, lastStock - curStock);
-        expectedUntilNext = lastSold;
-        dailyRate = lastSold / Math.max(1, daysNext);
+
+      // 3) 混合：有歷史則 55% 歷史 + 45% 上段；只有一方就用該方
+      if (histDaily != null && justEndedDaily != null) {
+        dailyRate = histDaily * 0.55 + justEndedDaily * 0.45;
+      } else if (histDaily != null) {
+        dailyRate = histDaily;
+      } else if (justEndedDaily != null) {
+        dailyRate = justEndedDaily;
+      }
+
+      // 4) 按下一段實際平日／周末組成調整
+      if (dailyRate != null) {
+        expectedUntilNext = dailyRate * daysNext;
+        if (dayProfile && dayProfile.overallDaily != null) {
+          const nextDate = new Date(date + 'T12:00:00');
+          nextDate.setDate(nextDate.getDate() + daysNext);
+          const nextStr = formatLocalDate(nextDate);
+          const mix = countWeekdayWeekend(date, nextStr);
+          const wdD = dayProfile.weekdayDaily != null ? dayProfile.weekdayDaily : dayProfile.overallDaily;
+          const weD = dayProfile.weekendDaily != null ? dayProfile.weekendDaily : dayProfile.overallDaily;
+          if (mix.total > 0 && (dayProfile.pattern !== 'stable' || (mix.weekend > 0 && mix.weekday > 0))) {
+            // 歷史日均比例 × 本段混合後的日均，再貼上 dailyRate 尺度
+            const profileDaily = (wdD * mix.weekday + weD * mix.weekend) / mix.total;
+            if (dayProfile.overallDaily > 0.05) {
+              const scale = profileDaily / dayProfile.overallDaily;
+              expectedUntilNext = dailyRate * daysNext * scale;
+              dailyRate = expectedUntilNext / Math.max(1, daysNext);
+            }
+          }
+        }
       }
 
       // 同一價錢但出貨較舊 → 銷量下調
@@ -3940,11 +4054,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       // 無歷史銷量時：用保守日均，避免「有存貨就說足夠」
       // 假設到下次至少會賣掉一些，仍要在下次保持最低庫存
       if (expectedUntilNext == null && !mustExchange(remainToday)) {
-        // 粗估：每 3 天約賣掉 1 個安全單位的一小部分，至少按天數比例
+        // 無任何歷史：用較保守估計，避免亂建議大貨
         const unit = getStripSize(prodId);
-        const conservativeDaily = Math.max(unit / 3, minBuf / 7); // 約每天數支
+        const conservativeDaily = Math.max(unit / 5, minBuf / 10);
         dailyRate = conservativeDaily;
         expectedUntilNext = conservativeDaily * daysNext;
+        histNote = (histNote ? histNote + '；' : '') + '欠缺同價歷史，採保守估算';
       }
 
       let strips = 0;
@@ -3977,7 +4092,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         dayPatternNote: dayPatternNote || '',
         dayProfile: dayProfile,
         discountSalesNote: discountSalesNote || '',
-        discountSalesFactor: discountSalesFactor
+        discountSalesFactor: discountSalesFactor,
+        histNote: typeof histNote !== 'undefined' ? (histNote || '') : ''
       };
 
       // 建議欄：Joie／Y1000 顯示支；其餘顯示條
@@ -4882,39 +4998,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       // 對比說明
       const cmpNote = '前月比：對比 ' + momFrom + '～' + momTo + '；前年比：對比 ' + yoyFrom + '～' + yoyTo + '。無對應數據顯示「-」。';
 
-      // 圖表資料：產品銷量、店舖 Top 8
-      const maxProdSales = Math.max(1, ...PRODUCTS.map(p => prodSalesTot[p.id] || 0));
-      const prodBars = PRODUCTS.map(function (p) {
-        const v = prodSalesTot[p.id] || 0;
-        const pct = Math.round(v / maxProdSales * 100);
-        const share = grandSales > 0 ? Math.round(v / grandSales * 100) : 0;
-        return '<div class="bar-row"><span class="bar-label">' + escapeXml(productShortCode(p.id)) + '</span>' +
-          '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
-          '<span class="bar-val">' + v + ' 支（' + share + '%）</span></div>';
-      }).join('');
-
-      const storeRank = storeIds.map(function (sid) {
-        const s = summary[sid];
-        let tot = 0;
-        PRODUCTS.forEach(function (p) {
-          const ag = s.products[p.id];
-          if (ag) tot += Math.round(ag.sales);
-        });
-        return { id: sid, name: s.storeName || sid, chain: s.chain || '', visits: s.visits || 0, sales: tot };
-      }).sort(function (a, b) { return b.sales - a.sales; });
-      const topStores = storeRank.slice(0, 8);
-      const maxStoreSales = Math.max(1, ...(topStores.map(function (x) { return x.sales; })));
-      const storeBars = topStores.map(function (x, i) {
-        const pct = Math.round(x.sales / maxStoreSales * 100);
-        return '<div class="bar-row"><span class="bar-label">#' + (i + 1) + ' ' + escapeXml(x.name) + '</span>' +
-          '<div class="bar-track"><div class="bar-fill alt" style="width:' + pct + '%"></div></div>' +
-          '<span class="bar-val">' + x.sales + '</span></div>';
-      }).join('');
-
       const avgPerStore = storeIds.length ? Math.round(grandSales / storeIds.length) : 0;
       const momPctAll = formatPctChange(grandSales, grandMom);
       const yoyPctAll = formatPctChange(grandSales, grandYoy);
       const totalVisits = storeIds.reduce(function (n, sid) { return n + (summary[sid].visits || 0); }, 0);
+
+      // 產品合計小表（文字，非圖表）
+      let prodSumHead = '<tr><th>項目</th>';
+      PRODUCTS.forEach(function (p) { prodSumHead += '<th>' + productShortCode(p.id) + '</th>'; });
+      prodSumHead += '<th>合計</th></tr>';
+      let prodSalesRow = '<tr><td>銷量（支）</td>';
+      let prodOrderRow = '<tr><td>落貨（支）</td>';
+      PRODUCTS.forEach(function (p) {
+        prodSalesRow += '<td class="num">' + (prodSalesTot[p.id] || 0) + '</td>';
+        prodOrderRow += '<td class="num">' + (prodOrderTot[p.id] || 0) + '</td>';
+      });
+      prodSalesRow += '<td class="num total">' + grandSales + '</td></tr>';
+      prodOrderRow += '<td class="num total">' + grandOrder + '</td></tr>';
 
       const html = `<!DOCTYPE html>
 <html lang="zh-HK">
@@ -4929,19 +5029,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
   .meta { color: #666; margin-bottom: 16px; font-size: 12px; }
   h2 { font-size: 14px; color: #333; border-left: 4px solid #E21530; padding-left: 8px; margin: 20px 0 10px; }
   .kpi { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
-  .kpi .card { flex: 1; min-width: 120px; background: #fff5f5; border: 1px solid #ffcdd2; border-radius: 10px; padding: 10px 12px; }
+  .kpi .card { flex: 1; min-width: 110px; background: #fff5f5; border: 1px solid #ffcdd2; border-radius: 10px; padding: 10px 12px; }
   .kpi .card .t { font-size: 11px; color: #888; }
   .kpi .card .v { font-size: 18px; font-weight: 700; color: #E60012; margin-top: 2px; }
   .kpi .card .s { font-size: 11px; color: #666; margin-top: 2px; }
-  .charts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 8px; }
-  .chart-box { flex: 1; min-width: 260px; border: 1px solid #eee; border-radius: 10px; padding: 12px; }
-  .chart-box h3 { margin: 0 0 10px; font-size: 13px; color: #333; }
-  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-  .bar-label { width: 110px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
-  .bar-track { flex: 1; height: 12px; background: #f0f0f0; border-radius: 6px; overflow: hidden; }
-  .bar-fill { height: 100%; background: #E60012; border-radius: 6px; }
-  .bar-fill.alt { background: #1565c0; }
-  .bar-val { width: 90px; text-align: right; font-size: 11px; color: #555; flex-shrink: 0; font-variant-numeric: tabular-nums; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
   th { background: #E60012; color: #fff; font-weight: 600; padding: 5px 4px; text-align: center; font-size: 10px; white-space: nowrap; }
   td { border: 1px solid #ddd; padding: 4px 5px; white-space: nowrap; }
@@ -4963,8 +5054,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     h1 { font-size: 16px; }
     th, td { padding: 4px; font-size: 10px; }
     .kpi .card { break-inside: avoid; }
-    .chart-box { break-inside: avoid; }
-    .bar-fill, .bar-fill.alt { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
@@ -4988,16 +5077,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     <div class="card"><div class="t">前年比</div><div class="v">${escapeXml(yoyPctAll)}</div><div class="s">同期對比</div></div>
   </div>
 
-  <div class="charts">
-    <div class="chart-box">
-      <h3>各產品銷量</h3>
-      ${prodBars}
-    </div>
-    <div class="chart-box">
-      <h3>銷量最高店舖（Top ${topStores.length}）</h3>
-      ${storeBars || '<div class="note">無資料</div>'}
-    </div>
-  </div>
+  <h2>產品合計</h2>
+  <table>
+    <thead>${prodSumHead}</thead>
+    <tbody>${prodSalesRow}${prodOrderRow}</tbody>
+  </table>
 
   <h2>店舖銷售摘要</h2>
   <table>
@@ -5396,44 +5480,71 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     // ========== 週行程表 ==========
-    const ROUTES_DEFAULT_VERSION = 2;
-    const DEFAULT_ROUTES = {1:[{storeId:'',name:'惠康 515 藍地',custom:true},{storeId:'',name:'一田 (NOVO WALK)',custom:true},{storeId:'',name:'手作功夫茶 (NOVOWALK)',custom:true},{storeId:'',name:'大生 (NOVOWALK)',custom:true},{storeId:'',name:'尚德中西藥房 (富泰)',custom:true},{storeId:'',name:'雄記 (富泰)',custom:true},{storeId:'',name:'百佳 665 富泰',custom:true},{storeId:'',name:'安寧藥房 (富泰)',custom:true},{storeId:'',name:'御品味 (富泰)',custom:true},{storeId:'',name:'金旺 (富泰)',custom:true},{storeId:'',name:'忠誠 (井財街)',custom:true},{storeId:'',name:'好佳好超級市場 (井財街)',custom:true},{storeId:'',name:'和記 (景峰花園)',custom:true},{storeId:'',name:'天天便利店 (景峰花園)',custom:true},{storeId:'',name:'惠康 107 新墟',custom:true},{storeId:'',name:'果典 (井財街)',custom:true},{storeId:'',name:'民泰 (井財街)',custom:true},{storeId:'',name:'利豐商店 (井財街)',custom:true},{storeId:'',name:'泰源米城 (雅都)',custom:true},{storeId:'',name:'佳寶 151 雅都',custom:true},{storeId:'',name:'佳寶 214 仁政',custom:true},{storeId:'',name:'惠康 442 仁政',custom:true},{storeId:'',name:'百佳 098 屯門中心',custom:true},{storeId:'',name:'惠康 586 屯門時代廣場',custom:true},{storeId:'',name:'純壽司 (錦薈坊)',custom:true},{storeId:'',name:'手作功夫茶 (錦薈坊)',custom:true},{storeId:'',name:'媽咪雞蛋仔 (屯門時代廣場北翼)',custom:true},{storeId:'',name:'Donki 008 屯門市廣場一期',custom:true},{storeId:'',name:'百佳 692 屯門市廣場二期',custom:true},{storeId:'',name:'再睡5分鐘 (屯門市廣場二期)',custom:true},{storeId:'',name:'Panash (屯門市廣場一期)',custom:true},{storeId:'',name:'Aeon (屯門市廣場一期)',custom:true},{storeId:'',name:'佳寶 106 置樂',custom:true},{storeId:'',name:'大生 (青海圍)',custom:true},{storeId:'',name:'CoCo 都可 (青海圍)',custom:true},{storeId:'',name:'明記 (置樂)',custom:true},{storeId:'',name:'明興 (置樂)',custom:true},{storeId:'',name:'易購 (置樂)',custom:true},{storeId:'',name:'好多多 (置樂)',custom:true},{storeId:'',name:'惠康 213 置樂',custom:true},{storeId:'',name:'DAN DAN 丹尼 (置樂)',custom:true}],2:[{storeId:'',name:'惠康 428 雅珊閣',custom:true},{storeId:'',name:'惠康 166 翠珊閣',custom:true},{storeId:'',name:'大飯糖 (雅珊閣)',custom:true},{storeId:'',name:'百佳 123 兆康',custom:true},{storeId:'',name:'泰豐 (兆康)',custom:true},{storeId:'',name:'榮豐 (兆康)',custom:true},{storeId:'',name:'福澤 (兆康)',custom:true},{storeId:'',name:'康隆 (兆康)',custom:true},{storeId:'',name:'百佳 646 欣田',custom:true},{storeId:'',name:'煒林中西藥房 (欣田)',custom:true},{storeId:'',name:'QQ便利店 (欣田)',custom:true},{storeId:'',name:'旺仔便利店 (欣田)',custom:true},{storeId:'',name:'錦興 (欣田)',custom:true},{storeId:'',name:'康達藥房 (菁田)',custom:true},{storeId:'',name:'惠康 587 菁田',custom:true},{storeId:'',name:'日記士多 (菁田)',custom:true},{storeId:'',name:'百佳 181 和田',custom:true},{storeId:'',name:'和田食品 (和田)',custom:true},{storeId:'',name:'果間士多 (和田)',custom:true},{storeId:'',name:'和田市集 (和田)',custom:true},{storeId:'',name:'百佳 695 寶田',custom:true},{storeId:'',name:'味思便利店 (寶田)',custom:true},{storeId:'',name:'家發海味雜貨 (寶田)',custom:true},{storeId:'',name:'惠康 424 良景',custom:true},{storeId:'',name:'大生 (良景)',custom:true},{storeId:'',name:'營多 (良景)',custom:true},{storeId:'',name:'聚星源 (良景)',custom:true},{storeId:'',name:'成興發 (良景)',custom:true},{storeId:'',name:'良景報社 (良景)',custom:true},{storeId:'',name:'ONE CAFE (青山醫院)',custom:true},{storeId:'',name:'悦心飯堂 (澤豐花園)',custom:true},{storeId:'',name:'家樂超級市場 (澤豐花園)',custom:true},{storeId:'',name:'康達藥房 (豐連)',custom:true},{storeId:'',name:'惠康 181 建生',custom:true},{storeId:'',name:'茶色生香 (建生)',custom:true},{storeId:'',name:'佳寶 076 海麗',custom:true},{storeId:'',name:'百佳 114 寶怡',custom:true}],3:[{storeId:'',name:'蜆殼油站 (屯門)',custom:true},{storeId:'',name:'一田 (NOVO WALK)',custom:true},{storeId:'',name:'手作功夫茶 (NOVOWALK)',custom:true},{storeId:'',name:'Esso (藍地)',custom:true},{storeId:'',name:'張芳利 (青海圍)',custom:true},{storeId:'',name:'偉記士多 (青磚圍)',custom:true},{storeId:'',name:'惠康 515 藍地',custom:true},{storeId:'',name:'宣興 (藍地大街)',custom:true},{storeId:'',name:'梁合記 (藍地大街)',custom:true},{storeId:'',name:'興發 (藍地大街)',custom:true},{storeId:'',name:'源昌鮮果 (藍地大街)',custom:true},{storeId:'',name:'聯興 (藍地大街)',custom:true},{storeId:'',name:'潘萬興 (藍地大街)',custom:true},{storeId:'',name:'九記 (藍地大街)',custom:true},{storeId:'',name:'新好景 (彩暉花園)',custom:true},{storeId:'',name:'華昇藥房 (雅都)',custom:true},{storeId:'',name:'大榮食品雜貨 (新墟街市)',custom:true},{storeId:'',name:'仁大藥房 (新墟街市)',custom:true},{storeId:'',name:'樂暉藥房 (德政圍)',custom:true},{storeId:'',name:'新樂暉藥房 (德政圍)',custom:true},{storeId:'',name:'海寶食品 (德政圍)',custom:true},{storeId:'',name:'佳寶 214 仁政',custom:true},{storeId:'',name:'惠康 442 仁政',custom:true},{storeId:'',name:'百佳 098 屯門中心',custom:true},{storeId:'',name:'惠康 586 屯門時代廣場',custom:true},{storeId:'',name:'Donki 008 屯門市廣場一期',custom:true},{storeId:'',name:'百佳 692 屯門市廣場二期',custom:true},{storeId:'',name:'再睡5分鐘 (屯門市廣場二期)',custom:true},{storeId:'',name:'Panash (屯門市廣場一期)',custom:true},{storeId:'',name:'Aeon (屯門市廣場一期)',custom:true}],4:[{storeId:'',name:'佳寶 106 置樂',custom:true},{storeId:'',name:'大生 (青海圍)',custom:true},{storeId:'',name:'CoCo 都可 (青海圍)',custom:true},{storeId:'',name:'明記 (置樂)',custom:true},{storeId:'',name:'明興 (置樂)',custom:true},{storeId:'',name:'易購 (置樂)',custom:true},{storeId:'',name:'惠康 213 置樂',custom:true},{storeId:'',name:'DAN DAN 丹尼 (置樂)',custom:true},{storeId:'',name:'斌利 (利發徑)',custom:true},{storeId:'',name:'泰源米城 (雅都)',custom:true},{storeId:'',name:'佳寶 151 雅都',custom:true},{storeId:'',name:'惠康 428 雅珊閣',custom:true},{storeId:'',name:'惠康 166 翠珊閣',custom:true},{storeId:'',name:'Esso (田廈路)',custom:true},{storeId:'',name:'正豐泰 (洪水橋大街)',custom:true},{storeId:'',name:'榮記 (丹桂村路)',custom:true},{storeId:'',name:'良興士多 (丹桂村路)',custom:true},{storeId:'',name:'百佳 646 欣田',custom:true},{storeId:'',name:'康達藥房 (菁田)',custom:true},{storeId:'',name:'惠康 587 菁田',custom:true},{storeId:'',name:'百佳 665 富泰',custom:true},{storeId:'',name:'安寧藥房 (富泰)',custom:true},{storeId:'',name:'御品味 (富泰)',custom:true},{storeId:'',name:'尚德中西藥房 (富泰)',custom:true},{storeId:'',name:'忠誠 (井財街)',custom:true},{storeId:'',name:'好佳好超級市場 (井財街)',custom:true},{storeId:'',name:'利豐商店 (井財街)',custom:true},{storeId:'',name:'和記 (景峰花園)',custom:true},{storeId:'',name:'天天便利店 (景峰花園)',custom:true},{storeId:'',name:'HKTV (景峰花園)',custom:true},{storeId:'',name:'惠康 107 新墟',custom:true},{storeId:'',name:'果典 (井財街)',custom:true},{storeId:'',name:'民泰 (井財街)',custom:true}],5:[{storeId:'',name:'佳寶 214 仁政',custom:true},{storeId:'',name:'惠康 442 仁政',custom:true},{storeId:'',name:'百佳 098 屯門中心',custom:true},{storeId:'',name:'百佳 123 兆康',custom:true},{storeId:'',name:'泰豐 (兆康)',custom:true},{storeId:'',name:'榮豐 (兆康)',custom:true},{storeId:'',name:'福澤 (兆康)',custom:true},{storeId:'',name:'康隆 (兆康)',custom:true},{storeId:'',name:'百佳 181 和田',custom:true},{storeId:'',name:'和田食品 (和田)',custom:true},{storeId:'',name:'果間士多 (和田)',custom:true},{storeId:'',name:'和田市集 (和田)',custom:true},{storeId:'',name:'一田 (NOVO WALK)',custom:true},{storeId:'',name:'手作功夫茶 (NOVOWALK)',custom:true},{storeId:'',name:'大生 (NOVOWALK)',custom:true},{storeId:'',name:'百佳 695 寶田',custom:true},{storeId:'',name:'盈輝糖果屋 (盈豐園)',custom:true},{storeId:'',name:'森哥 (盈豐園)',custom:true},{storeId:'',name:'潮食 (盈豐園)',custom:true},{storeId:'',name:'惠康 181 建生',custom:true},{storeId:'',name:'佳寶 076 海麗',custom:true},{storeId:'',name:'百佳 114 寶怡',custom:true},{storeId:'',name:'康達藥房 (豐連)',custom:true},{storeId:'',name:'惠康 424 良景',custom:true},{storeId:'',name:'大生 (良景)',custom:true},{storeId:'',name:'聚星源 (良景)',custom:true},{storeId:'',name:'成興發 (良景)',custom:true},{storeId:'',name:'良景報社 (良景)',custom:true},{storeId:'',name:'Aeon (屯門市廣場一期)',custom:true},{storeId:'',name:'惠康 586 屯門時代廣場2',custom:true},{storeId:'',name:'大生 (屯門時代廣場南翼)',custom:true},{storeId:'',name:'純壽司 (錦薈坊)',custom:true},{storeId:'',name:'手作功夫茶 (錦薈坊)',custom:true},{storeId:'',name:'媽咪雞蛋仔 (屯門時代廣場北翼)',custom:true},{storeId:'',name:'千色citistore (屯門時代廣場北翼)',custom:true},{storeId:'',name:'Donki 008 屯門市廣場一期',custom:true},{storeId:'',name:'百佳 692 屯門市廣場二期',custom:true},{storeId:'',name:'Panash (屯門市廣場一期)',custom:true}],6:[{storeId:'',name:'百佳 646 欣田',custom:true},{storeId:'',name:'康達藥房 (菁田)',custom:true},{storeId:'',name:'惠康 587 菁田',custom:true}]};
+    const ROUTES_DEFAULT_VERSION = 3;
+    function emptyWeekRoutes() {
+      return { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+    }
+    // 不再預載任何戶口（各地區自行新增；舊資料會由 localStorage 遷移）
+    const DEFAULT_ROUTES = emptyWeekRoutes();
     let _routeDay = 1;
+    function normalizeWeekRoutes(data) {
+      const out = emptyWeekRoutes();
+      if (!data || typeof data !== 'object') return out;
+      for (let d = 1; d <= 6; d++) {
+        const arr = Array.isArray(data[d]) ? data[d] : (Array.isArray(data[String(d)]) ? data[String(d)] : []);
+        out[d] = arr.map(function (x) { return Object.assign({}, x); });
+      }
+      return out;
+    }
+
     function loadRoutes() {
       try {
-        const ver = parseInt(localStorage.getItem('yakult_routes_ver') || '0', 10);
-        const raw = localStorage.getItem('yakult_routes');
-        const data = raw ? JSON.parse(raw) : null;
-        const out = {};
-        let total = 0;
-        if (data && typeof data === 'object') {
-          for (let d = 1; d <= 6; d++) {
-            out[d] = Array.isArray(data[d]) ? data[d] : (Array.isArray(data[String(d)]) ? data[String(d)] : []);
-            total += out[d].length;
-          }
+        const reg = getCurrentRegion();
+        // 地區已有 routes 欄（即使全空）→ 以地區為準，不再用全域舊資料覆蓋
+        if (reg && Object.prototype.hasOwnProperty.call(reg, 'routes') && reg.routes && typeof reg.routes === 'object') {
+          return normalizeWeekRoutes(reg.routes);
         }
-        // 空白或版本過舊 → 載入 PDF／圖表預設行程（不寫入店舖管理）
-        if (!data || total === 0 || ver < ROUTES_DEFAULT_VERSION) {
-          for (let d = 1; d <= 6; d++) {
-            out[d] = (DEFAULT_ROUTES[d] || []).map(function (x) { return Object.assign({}, x); });
+        let migrated = null;
+        try {
+          const raw = localStorage.getItem('yakult_routes');
+          if (raw) {
+            const data = JSON.parse(raw);
+            migrated = normalizeWeekRoutes(data);
           }
-          try {
-            localStorage.setItem('yakult_routes', JSON.stringify(out));
-            localStorage.setItem('yakult_routes_updated_at', new Date().toISOString());
-            localStorage.setItem('yakult_routes_ver', String(ROUTES_DEFAULT_VERSION));
-          } catch (e2) {}
+        } catch (e) {}
+        const out = migrated || emptyWeekRoutes();
+        if (reg) {
+          reg.routes = out;
+          reg.routesUpdatedAt = new Date().toISOString();
+          regionsData.regions[reg.id] = reg;
+          saveRegionsData(regionsData);
         }
+        try {
+          localStorage.setItem('yakult_routes', JSON.stringify(out));
+          localStorage.setItem('yakult_routes_updated_at', new Date().toISOString());
+          localStorage.setItem('yakult_routes_ver', String(ROUTES_DEFAULT_VERSION));
+        } catch (e2) {}
         return out;
       } catch (e) {
-        const out = {};
-        for (let d = 1; d <= 6; d++) out[d] = (DEFAULT_ROUTES[d] || []).map(function (x) { return Object.assign({}, x); });
-        return out;
+        return emptyWeekRoutes();
       }
     }
 
     function saveRoutes(data) {
-      localStorage.setItem('yakult_routes', JSON.stringify(data || {}));
-      localStorage.setItem('yakult_routes_updated_at', new Date().toISOString());
+      const out = normalizeWeekRoutes(data || {});
+      try {
+        const reg = getCurrentRegion();
+        if (reg) {
+          reg.routes = out;
+          reg.routesUpdatedAt = new Date().toISOString();
+          regionsData.regions[reg.id] = reg;
+          saveRegionsData(regionsData);
+        }
+      } catch (e) {}
+      try {
+        localStorage.setItem('yakult_routes', JSON.stringify(out));
+        localStorage.setItem('yakult_routes_updated_at', new Date().toISOString());
+      } catch (e2) {}
     }
     function selectRouteDay(day) {
       _routeDay = day;
@@ -5498,6 +5609,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           '<span style="width:1.3em;color:var(--muted);font-size:0.75rem;flex-shrink:0;">' + (i + 1) + '</span>' +
           '<span style="flex:1;min-width:0;font-size:0.85rem;line-height:1.35;' + (selected ? 'font-weight:700;' : '') + '">' + safe + '</span>' +
           '<button type="button" class="btn btn-secondary" title="' + (hasPin ? '已設位置' : '設定地圖位置') + '" style="' + mapBtnStyle + '" onclick="event.stopPropagation();openMapPick(' + i + ')">🗺️</button>' +
+          '<button type="button" class="btn" style="width:auto;padding:4px 8px;font-size:0.72rem;background:#dc3545;color:#fff;flex-shrink:0;" onclick="event.stopPropagation();removeRouteItem(' + i + ')">刪</button>' +
           '</div>';
       }).join('');
       setupRouteDrag(box);
@@ -5575,12 +5687,36 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     function loadRouteCoords() {
       try {
-        const raw = localStorage.getItem('yakult_route_coords');
-        return raw ? JSON.parse(raw) : {};
+        const reg = getCurrentRegion();
+        if (reg && reg.routeCoords && typeof reg.routeCoords === 'object') {
+          return Object.assign({}, reg.routeCoords);
+        }
+        let legacy = {};
+        try {
+          const raw = localStorage.getItem('yakult_route_coords');
+          if (raw) legacy = JSON.parse(raw) || {};
+        } catch (e) {}
+        if (reg) {
+          reg.routeCoords = legacy;
+          regionsData.regions[reg.id] = reg;
+          saveRegionsData(regionsData);
+        }
+        return Object.assign({}, legacy);
       } catch (e) { return {}; }
     }
     function saveRouteCoords(obj) {
-      localStorage.setItem('yakult_route_coords', JSON.stringify(obj || {}));
+      const o = obj || {};
+      try {
+        const reg = getCurrentRegion();
+        if (reg) {
+          reg.routeCoords = o;
+          regionsData.regions[reg.id] = reg;
+          saveRegionsData(regionsData);
+        }
+      } catch (e) {}
+      try {
+        localStorage.setItem('yakult_route_coords', JSON.stringify(o));
+      } catch (e2) {}
     }
     function getItemCoords(item, coordsMap) {
       coordsMap = coordsMap || loadRouteCoords();
@@ -5687,10 +5823,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       const dest = Number(lat).toFixed(6) + ',' + Number(lng).toFixed(6);
-      const label = encodeURIComponent(name || '目的地');
-      // Google Maps 導航（iOS/Android 多數可打開 App）
-      const url = 'https://www.google.com/maps/dir/?api=1&destination=' + dest + '&destination_place_id=&travelmode=driving';
-      // 同時提供 geo: 後備
+      // 開啟手機地圖導航（系統會用已安裝的地圖 App）
+      const url = 'https://www.google.com/maps/dir/?api=1&destination=' + dest + '&travelmode=driving';
       try {
         window.open(url, '_blank');
       } catch (e) {
@@ -5698,6 +5832,19 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       showToast('開啟導航：' + (name || dest));
     }
+
+    function getDayRoutePointsWithCoords() {
+      const list = loadRoutes()[_routeDay] || [];
+      const coords = loadRouteCoords();
+      const points = [];
+      list.forEach(function (item, i) {
+        const c = getItemCoords(item, coords);
+        if (c) points.push({ i: i + 1, name: item.name || '', lat: c.lat, lng: c.lng });
+      });
+      return points;
+    }
+
+
 
     function updateNextStopUI(panToStop) {
       const el = $('mapRouteNext');
@@ -6062,13 +6209,166 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const list = data[_routeDay] || [];
       if (idx < 0 || idx >= list.length) return;
       const name = list[idx].name || '';
+      if (!confirm('確定從行程刪除「' + name + '」？')) return;
       list.splice(idx, 1);
       data[_routeDay] = list;
+      // 一併清掉該戶地圖座標（按名稱 key）
+      try {
+        const coords = loadRouteCoords();
+        const key = 'n:' + name;
+        if (coords[key]) {
+          delete coords[key];
+          saveRouteCoords(coords);
+        }
+      } catch (e) {}
+      _routeSelectedIdx = -1;
       saveRoutes(data);
+      // 強制寫入地區，避免被舊快取蓋返
+      try {
+        const reg = getCurrentRegion();
+        if (reg) {
+          reg.routes = normalizeWeekRoutes(data);
+          reg.routesUpdatedAt = new Date().toISOString();
+          regionsData.regions[reg.id] = reg;
+          saveRegionsData(regionsData);
+        }
+        localStorage.setItem('yakult_routes', JSON.stringify(normalizeWeekRoutes(data)));
+        localStorage.setItem('yakult_routes_updated_at', new Date().toISOString());
+      } catch (e2) {}
       selectRouteDay(_routeDay);
-      showToast('已移除 ' + name);
+      showToast('已刪除「' + name + '」');
     }
     // 以店舖管理的車期，產生當日行程初稿（只加未在名單的店）
+
+    function exportRegionRoutesJSON() {
+      const reg = getCurrentRegion();
+      const routes = loadRoutes();
+      const coords = loadRouteCoords();
+      const name = (reg && reg.name) ? reg.name : '地區';
+      const payload = {
+        type: 'yakult_region_routes',
+        version: 1,
+        regionName: name,
+        regionId: reg ? reg.id : '',
+        exportedAt: new Date().toISOString(),
+        routes: routes,
+        routeCoords: coords
+      };
+      const fname = '行程_' + name + '_' + (new Date().toISOString().slice(0, 10)) + '.json';
+      const body = JSON.stringify(payload, null, 2);
+      if (typeof downloadBlob === 'function') {
+        downloadBlob(fname, 'application/json;charset=utf-8;', body, false);
+      } else {
+        const blob = new Blob([body], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fname;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { document.body.removeChild(a); }, 500);
+      }
+      showToast('已匯出「' + name + '」行程資料');
+    }
+
+    function triggerImportRegionRoutes() {
+      const inp = $('routeImportFile');
+      if (!inp) return;
+      inp.value = '';
+      inp.click();
+    }
+
+    function onRouteImportFile(ev) {
+      const file = ev.target && ev.target.files && ev.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          const raw = JSON.parse(String(reader.result || ''));
+          importRegionRoutesData(raw);
+        } catch (e) {
+          showToast('檔案格式錯誤，無法匯入');
+        }
+        ev.target.value = '';
+      };
+      reader.onerror = function () {
+        showToast('讀取檔案失敗');
+        ev.target.value = '';
+      };
+      reader.readAsText(file, 'utf-8');
+    }
+
+    function importRegionRoutesData(raw) {
+      if (!raw || typeof raw !== 'object') {
+        showToast('無效的行程資料');
+        return;
+      }
+      // 支援：完整備份、或獨立行程檔
+      let routes = raw.routes;
+      let coords = raw.routeCoords || {};
+      let suggestName = raw.regionName || '';
+      if (!routes && raw.type === 'yakult_region_routes') {
+        showToast('檔案沒有行程資料');
+        return;
+      }
+      // 舊版可能直接是 {1:[],2:[]...}
+      if (!routes && (raw[1] || raw['1'])) {
+        routes = raw;
+        coords = {};
+      }
+      if (!routes || typeof routes !== 'object') {
+        showToast('找不到行程內容');
+        return;
+      }
+      const normalized = normalizeWeekRoutes(routes);
+      let total = 0;
+      for (let d = 1; d <= 6; d++) total += (normalized[d] || []).length;
+      if (!total) {
+        if (!confirm('匯入的行程是空白的，仍要繼續？')) return;
+      }
+      const choice = prompt(
+        '匯入方式：\n1 = 覆蓋目前地區行程\n2 = 新增一個地區並匯入\n\n請輸入 1 或 2',
+        '1'
+      );
+      if (choice === null) return;
+      const mode = String(choice).trim();
+      if (mode === '2') {
+        const name = prompt('新地區名稱', suggestName || '匯入地區') || '';
+        const n = String(name).trim() || '匯入地區';
+        saveStoresList();
+        try { saveRoutes(loadRoutes()); } catch (e) {}
+        const id = 'region_' + Date.now();
+        regionsData.regions[id] = {
+          id: id,
+          name: n,
+          stores: [],
+          routes: normalized,
+          routeCoords: (coords && typeof coords === 'object') ? coords : {},
+          updatedAt: new Date().toISOString()
+        };
+        regionsData.currentId = id;
+        saveRegionsData(regionsData);
+        STORES = loadStoresList();
+        refreshRegionSelect();
+        refreshStoreDropdowns();
+        renderStoreManageList();
+        _routeSelectedIdx = -1;
+        selectRouteDay(_routeDay || 1);
+        showToast('已新增地區「' + n + '」並匯入行程（' + total + ' 戶）');
+        return;
+      }
+      if (mode !== '1') {
+        showToast('已取消');
+        return;
+      }
+      if (!confirm('確定覆蓋「' + (getCurrentRegion().name || '目前地區') + '」的行程？')) return;
+      saveRoutes(normalized);
+      saveRouteCoords((coords && typeof coords === 'object') ? coords : {});
+      refreshRegionSelect();
+      _routeSelectedIdx = -1;
+      selectRouteDay(_routeDay || 1);
+      showToast('已匯入行程至本區（' + total + ' 戶）');
+    }
+
     function exportRoutePDF() {
       const day = _routeDay || 1;
       const list = loadRoutes()[day] || [];
@@ -6078,6 +6378,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       }
       const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
       const dayLabel = '星期' + DAY_NAMES[day];
+      const regionName = (typeof getCurrentRegion === 'function' && getCurrentRegion()) ? (getCurrentRegion().name || '') : '';
+      const headTitle = regionName ? (regionName + ' · ' + dayLabel + ' 行程') : (dayLabel + ' 行程');
       let body = '';
       list.forEach(function (item, i) {
         const name = (item && item.name) ? item.name : '';
@@ -6088,7 +6390,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${dayLabel} 行程</title>
+<title>${headTitle}</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; color: #222; margin: 16px; font-size: 16px; }
@@ -6113,7 +6415,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 </head>
 <body>
   <button onclick="window.print()">列印 / 儲存為 PDF</button>
-  <h1>${dayLabel} 行程</h1>
+  <h1>${headTitle}</h1>
   <div class="meta">${list.length} 戶　·　產生時間：${genTime}</div>
   <table>
     <thead><tr><th>#</th><th>戶口</th></tr></thead>
@@ -6141,6 +6443,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       const dayLabel = '星期' + DAY_NAMES[day];
+      const regionName = (typeof getCurrentRegion === 'function' && getCurrentRegion()) ? (getCurrentRegion().name || '') : '';
+      const titleText = regionName ? (regionName + ' · ' + dayLabel + ' 行程') : (dayLabel + ' 行程');
       const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
       const scale = 2; // 高清
       const width = 420;
@@ -6166,7 +6470,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       ctx.fillStyle = '#E60012';
       ctx.font = 'bold 22px "PingFang TC","Microsoft JhengHei",sans-serif';
       ctx.textBaseline = 'top';
-      ctx.fillText(dayLabel + ' 行程', pad, pad);
+      ctx.fillText(titleText, pad, pad);
 
       // 副標
       ctx.fillStyle = '#888888';
@@ -6223,7 +6527,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       ctx.textBaseline = 'top';
       ctx.fillText('按編號順序到店。', pad, footY);
 
-      const fileName = dayLabel + '行程.png';
+      const fileName = (regionName ? regionName + '_' : '') + dayLabel + '行程.png';
       canvas.toBlob(function (blob) {
         if (!blob) {
           showToast('產生圖片失敗');
@@ -6262,12 +6566,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     function resetRoutesFromDefault() {
-      if (!confirm('確定還原為圖表預設行程？現有行程會被覆蓋。')) return;
-      const out = {};
-      for (let d = 1; d <= 6; d++) {
-        out[d] = (DEFAULT_ROUTES[d] || []).map(function (x) { return Object.assign({}, x); });
-      }
+      if (!confirm('確定清空本區所有行程？')) return;
+      const out = emptyWeekRoutes();
       saveRoutes(out);
+      saveRouteCoords({});
       try { localStorage.setItem('yakult_routes_ver', String(ROUTES_DEFAULT_VERSION)); } catch (e) {}
       selectRouteDay(_routeDay);
       showToast('已還原為 PDF 預設行程');
