@@ -3892,26 +3892,44 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     // 由記錄日至下次到店，若中間有預計轉價，將天數拆成「現價／新價」兩段
     function splitDaysByUpcomingPrice(storeId, prodId, fromDateStr, daysNext, currentPrice) {
       const chain = getStoreChain(storeId);
-      if (!chain || !daysNext || daysNext < 1) {
+      if (!daysNext || daysNext < 1) {
         return [{ days: daysNext || 0, price: currentPrice, label: '現價' }];
       }
       const from = new Date(fromDateStr + 'T12:00:00');
       const nextVisit = new Date(from);
       nextVisit.setDate(from.getDate() + daysNext);
       const nextVisitStr = formatLocalDate(nextVisit);
-      const nextSched = getNextScheduleEntry(chain, fromDateStr);
+      // 無集團時仍嘗試用 store 所屬 chain；搵唔到就唔分段
+      const nextSched = chain ? getNextScheduleEntry(chain, fromDateStr) : null;
       if (!nextSched || !nextSched.effectiveDate) {
         return [{ days: daysNext, price: currentPrice, label: '現價' }];
       }
       const changeStr = nextSched.effectiveDate;
-      if (changeStr <= fromDateStr || changeStr > nextVisitStr) {
+      // 轉價日已過或遠過下次到店 → 唔分段
+      if (changeStr <= fromDateStr) {
         return [{ days: daysNext, price: currentPrice, label: '現價' }];
+      }
+      // 轉價喺下次到店之後：整段仍係現價，但標記「即將轉價」畀外層少落
+      if (changeStr > nextVisitStr) {
+        return [{
+          days: daysNext,
+          price: currentPrice,
+          label: '現價',
+          upcomingChangeDate: changeStr,
+          upcomingPrice: (nextSched.prices && nextSched.prices[prodId] != null && nextSched.prices[prodId] !== '' && !isNaN(parseFloat(nextSched.prices[prodId])))
+            ? parseFloat(nextSched.prices[prodId]) : null
+        }];
       }
       const change = new Date(changeStr + 'T12:00:00');
       let daysOld = Math.round((change - from) / 86400000);
       if (daysOld < 0) daysOld = 0;
       if (daysOld > daysNext) daysOld = daysNext;
-      const daysNew = daysNext - daysOld;
+      let daysNew = daysNext - daysOld;
+      // 轉價日 = 下次到店日：至少留 1 日用新價估算（避免全日仍按特價計）
+      if (daysNew === 0 && changeStr <= nextVisitStr) {
+        daysOld = Math.max(0, daysNext - 1);
+        daysNew = daysNext - daysOld;
+      }
       let newPrice = currentPrice;
       if (nextSched.prices && nextSched.prices[prodId] != null && nextSched.prices[prodId] !== '' &&
           !isNaN(parseFloat(nextSched.prices[prodId]))) {
@@ -4202,52 +4220,53 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         }
       }
 
-      // 4) 按「預計轉價」將下次到店前拆成現價／新價兩段估算
+      // 4) 按「預計轉價」分段；加價（特價完）要明顯少落，唔好再按特價日均估全日
       let scheduleSplitNote = '';
+      let priceRiseSoon = false; // 即將轉貴／特價結束
+      let priceDropSoon = false;
       const segments = splitDaysByUpcomingPrice(storeId, prodId, date, daysNext, targetPrice);
-      if (segments.length > 1) {
+      const hasSplit = segments.length > 1;
+      const upcomingMeta = segments[0] && segments[0].upcomingChangeDate ? segments[0] : null;
+
+      function dailyForSegment(seg, baseDaily) {
+        if (!seg.isNew) return baseDaily != null ? baseDaily : 0;
+        const est = estimateDailyRateForPrice(storeId, prodId, seg.price, date);
+        let segDaily = est && est.daily != null ? est.daily : null;
+        if (segDaily == null && baseDaily != null && targetPrice != null && seg.price != null && Number(targetPrice) > 0) {
+          const oldP = Number(targetPrice);
+          const newP = Number(seg.price);
+          if (newP > oldP * 1.02) {
+            // 轉貴／特價結束：無新價歷史時，只按特價日均約 25%～40% 估（避免仍建議落很多）
+            const ratio = oldP / Math.max(newP, 0.5);
+            const lift = Math.max(0.25, Math.min(0.40, Math.pow(ratio, 1.2)));
+            segDaily = baseDaily * lift;
+          } else if (newP < oldP * 0.98) {
+            // 轉平：可略增，但有上限
+            const ratio = oldP / Math.max(newP, 0.5);
+            const lift = Math.max(1.05, Math.min(1.5, Math.pow(ratio, 0.8)));
+            segDaily = baseDaily * lift;
+          } else {
+            segDaily = baseDaily;
+          }
+        }
+        if (segDaily == null) segDaily = baseDaily != null ? baseDaily * 0.3 : 0;
+        return Math.max(0, segDaily);
+      }
+
+      if (hasSplit) {
         let totalExp = 0;
         let weightedDaily = 0;
         let dayCount = 0;
         const bits = [];
         segments.forEach(function (seg) {
-          let segDaily = null;
-          if (seg.isNew) {
-            const est = estimateDailyRateForPrice(storeId, prodId, seg.price, date);
-            segDaily = est && est.daily != null ? est.daily : null;
-            // 新價未有歷史：用現價日均 × 粗略價比（特價通常更高銷）
-            if (segDaily == null && dailyRate != null && targetPrice != null && seg.price != null && targetPrice > 0) {
-              const ratio = targetPrice / Math.max(seg.price, 0.5);
-              // 減價 → 銷量上調；加價 → 下調，限制幅度
-              const lift = Math.max(0.6, Math.min(1.8, Math.pow(ratio, 0.9)));
-              segDaily = dailyRate * lift;
-            }
-            if (segDaily == null) segDaily = dailyRate;
-          } else {
-            segDaily = dailyRate;
+          const segDaily = dailyForSegment(seg, dailyRate);
+          if (seg.isNew && targetPrice != null && seg.price != null && Number(seg.price) > Number(targetPrice) * 1.02) {
+            priceRiseSoon = true;
           }
-          if (segDaily == null) segDaily = 0;
-          // 平日／周末：用對應價的 dayProfile（若有）
+          if (seg.isNew && targetPrice != null && seg.price != null && Number(seg.price) < Number(targetPrice) * 0.98) {
+            priceDropSoon = true;
+          }
           let segExp = segDaily * seg.days;
-          const estProf = (!seg.isNew && dayProfile) ? dayProfile :
-            (seg.isNew ? (estimateDailyRateForPrice(storeId, prodId, seg.price, date) || {}).dayProfile : null);
-          if (estProf && estProf.overallDaily != null && seg.days > 0) {
-            const segStart = new Date(date + 'T12:00:00');
-            if (seg.isNew && seg.changeDate) {
-              // 新價段由轉價日起計
-              const ch = new Date(seg.changeDate + 'T12:00:00');
-              const mix = countWeekdayWeekend(
-                formatLocalDate(new Date(ch.getTime() - 86400000)),
-                formatLocalDate(new Date(ch.getTime() + (seg.days) * 86400000))
-              );
-              const wdD = estProf.weekdayDaily != null ? estProf.weekdayDaily : estProf.overallDaily;
-              const weD = estProf.weekendDaily != null ? estProf.weekendDaily : estProf.overallDaily;
-              if (mix.total > 0 && estProf.overallDaily > 0.05) {
-                const profileDaily = (wdD * mix.weekday + weD * mix.weekend) / mix.total;
-                segExp = segDaily * seg.days * (profileDaily / estProf.overallDaily);
-              }
-            }
-          }
           totalExp += Math.max(0, segExp);
           weightedDaily += segDaily * seg.days;
           dayCount += seg.days;
@@ -4256,6 +4275,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         expectedUntilNext = totalExp;
         if (dayCount > 0) dailyRate = weightedDaily / dayCount;
         scheduleSplitNote = '下次到店前會轉價（' + bits.join('，') + '），已分段估算';
+        if (priceRiseSoon) scheduleSplitNote += '；轉貴後按較低銷量計，避免多落';
         histNote = (histNote ? histNote + '；' : '') + scheduleSplitNote;
       } else if (dailyRate != null) {
         expectedUntilNext = dailyRate * daysNext;
@@ -4273,6 +4293,16 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
               expectedUntilNext = dailyRate * daysNext * scale;
               dailyRate = expectedUntilNext / Math.max(1, daysNext);
             }
+          }
+        }
+        // 轉價喺下次到店之後但好近：貨會捱過轉價，加價則少落
+        if (upcomingMeta && upcomingMeta.upcomingPrice != null && targetPrice != null) {
+          const daysToChange = Math.round((new Date(upcomingMeta.upcomingChangeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
+          if (Number(upcomingMeta.upcomingPrice) > Number(targetPrice) * 1.02 && daysToChange <= 7) {
+            priceRiseSoon = true;
+            expectedUntilNext = (expectedUntilNext || 0) * 0.75;
+            scheduleSplitNote = '即將於 ' + upcomingMeta.upcomingChangeDate.slice(5) + ' 轉貴至 $' + upcomingMeta.upcomingPrice + '，建議少落免積壓';
+            histNote = (histNote ? histNote + '；' : '') + scheduleSplitNote;
           }
         }
       }
@@ -4318,13 +4348,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         adjMinBuf = 0;
         expNote = (expNote ? expNote + '·' : '') + '務求下次賣清·不強留安全庫存';
       } else if (remainToday != null && remainToday < 20 && weakSeller) {
-        // 貨偏舊且淡銷：寧願賣到沒有，避免更近到期
         adjMinBuf = 0;
         expNote = (expNote ? expNote + '·' : '') + '淡銷且偏舊·少落防近到期';
       } else if (weakSeller && remainToday != null && remainToday < 26) {
-        // 淡銷但未近到期：安全庫存減半（仍留一點畀 merchandiser，但唔硬頂滿）
         adjMinBuf = Math.ceil(minBuf / 2);
         expNote = (expNote ? expNote + '·' : '') + '淡銷·安全庫存減半';
+      }
+      // 即將轉貴（特價結束）：唔好為湊滿安全庫存而多落，避免轉價後賣唔走
+      if (typeof priceRiseSoon !== 'undefined' && priceRiseSoon && !mustExchange(remainToday)) {
+        adjMinBuf = 0;
+        expNote = (expNote ? expNote + '·' : '') + '即將轉貴·不強留安全庫存';
+        // 再削減預估銷量：只夠賣完特價尾聲，唔按特價高峰估全日
+        if (expectedUntilNext != null && expectedUntilNext > 0) {
+          expectedUntilNext = expectedUntilNext * 0.65;
+          histNote = (histNote ? histNote + '；' : '') + '轉貴在即，預估再下調';
+        }
       }
       // 其餘正常貨：adjMinBuf = minBuf（20／10），照顧 merchandiser 執貨標準
 
@@ -4338,9 +4376,18 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
       let strips = 0;
       let suggestPacks = 0;
-      // 目標：下次到店時庫存仍 ≥ 最低安全量
-      // 需要量 = 預計到下次銷量 + 最低安全庫存
+      // 目標：預計銷量 + 安全庫存；轉貴時安全庫存已為 0
       expectedUntilNext = Math.max(0, expectedUntilNext || 0);
+      // 轉貴：建議上限 = 現有缺口補到「特價剩餘日數可賣量」為主，避免一次落太多
+      if (typeof priceRiseSoon !== 'undefined' && priceRiseSoon) {
+        const chain = getStoreChain(storeId);
+        const nextSched = chain ? getNextScheduleEntry(chain, date) : null;
+        if (nextSched && nextSched.effectiveDate && dailyRate != null) {
+          const daysToCh = Math.max(1, Math.round((new Date(nextSched.effectiveDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000));
+          const cap = dailyRate * Math.min(daysToCh, daysNext) * 1.15;
+          if (expectedUntilNext > cap) expectedUntilNext = cap;
+        }
+      }
       const need = expectedUntilNext + adjMinBuf;
       const rawNeed = Math.max(0, need - curStock);
       suggestPacks = roundToStrip(rawNeed, prodId);
