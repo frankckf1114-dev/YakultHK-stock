@@ -549,8 +549,8 @@
             <input type="text" id="routeAddCustomName" placeholder="輸入戶口名稱後新增" autocomplete="off" style="flex:1;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();addRouteCustom();}">
             <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">＋ 新增</button>
           </div>
-          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRoutePDF()">📄 匯出當日行程 PDF</button>
           <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRouteImage()">🖼️ 匯出當日行程長圖</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#2e7d32;" onclick="exportAllRouteImages()">🖼️ 匯出一至六全部長圖</button>
           <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRegionRoutesJSON()">💾 匯出本區行程資料</button>
           <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="triggerImportRegionRoutes()">📥 匯入行程資料</button>
           <input type="file" id="routeImportFile" accept="application/json,.json" class="hidden" style="display:none;" onchange="onRouteImportFile(event)">
@@ -6759,19 +6759,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       showToast('已匯出「' + dayLabel + '」行程');
     }
 
-    // 一鍵匯出當日行程長圖（PNG），方便傳給不懂開 PDF 的同事
-    function exportRouteImage() {
-      const day = _routeDay || 1;
+    // 建立某日行程長圖 canvas（回傳 null 若無戶口）
+    function buildRouteDayImage(day) {
       const list = loadRoutes()[day] || [];
-      if (!list.length) {
-        showToast('此日沒有行程，請先選擇有戶口的日子');
-        return;
-      }
+      if (!list.length) return null;
       const dayLabel = '星期' + DAY_NAMES[day];
       const regionName = (typeof getCurrentRegion === 'function' && getCurrentRegion()) ? (getCurrentRegion().name || '') : '';
       const titleText = regionName ? (regionName + ' · ' + dayLabel + ' 行程') : (dayLabel + ' 行程');
       const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
-      const scale = 2; // 高清
+      const scale = 2;
       const width = 420;
       const pad = 20;
       const titleH = 36;
@@ -6787,22 +6783,18 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const ctx = canvas.getContext('2d');
       ctx.scale(scale, scale);
 
-      // 背景
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
 
-      // 標題
       ctx.fillStyle = '#E60012';
       ctx.font = 'bold 22px "PingFang TC","Microsoft JhengHei",sans-serif';
       ctx.textBaseline = 'top';
       ctx.fillText(titleText, pad, pad);
 
-      // 副標
       ctx.fillStyle = '#888888';
       ctx.font = '13px "PingFang TC","Microsoft JhengHei",sans-serif';
       ctx.fillText(list.length + ' 戶　·　產生時間：' + genTime, pad, pad + titleH);
 
-      // 表頭
       const tableTop = pad + titleH + metaH;
       ctx.fillStyle = '#E60012';
       ctx.fillRect(pad, tableTop, width - pad * 2, headH);
@@ -6812,14 +6804,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       ctx.fillText('#', pad + 12, tableTop + headH / 2);
       ctx.fillText('戶口', pad + 48, tableTop + headH / 2);
 
-      // 列
       list.forEach(function (item, i) {
         const y = tableTop + headH + i * rowH;
         if (i % 2 === 1) {
           ctx.fillStyle = '#fafafa';
           ctx.fillRect(pad, y, width - pad * 2, rowH);
         }
-        // 底線
         ctx.strokeStyle = '#eeeeee';
         ctx.beginPath();
         ctx.moveTo(pad, y + rowH);
@@ -6834,18 +6824,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         ctx.fillStyle = '#222222';
         ctx.font = '15px "PingFang TC","Microsoft JhengHei",sans-serif';
         let name = (item && item.name) ? String(item.name) : '';
-        // 過長截斷
         const maxW = width - pad * 2 - 56;
+        const fullName = name;
         while (name.length > 1 && ctx.measureText(name).width > maxW) {
           name = name.slice(0, -1);
         }
-        if (name !== (item && item.name ? String(item.name) : '') && name.length > 0) {
-          name = name.slice(0, -1) + '…';
-        }
+        if (name !== fullName && name.length > 0) name = name.slice(0, -1) + '…';
         ctx.fillText(name, pad + 48, y + rowH / 2);
       });
 
-      // 註腳
       const footY = tableTop + headH + list.length * rowH + 12;
       ctx.fillStyle = '#999999';
       ctx.font = '12px "PingFang TC","Microsoft JhengHei",sans-serif';
@@ -6853,27 +6840,69 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       ctx.fillText('按編號順序到店。', pad, footY);
 
       const fileName = (regionName ? regionName + '_' : '') + dayLabel + '行程.png';
-      canvas.toBlob(function (blob) {
-        if (!blob) {
-          showToast('產生圖片失敗');
-          return;
-        }
-        // 支援分享則優先分享，否則下載
-        const file = new File([blob], fileName, { type: 'image/png' });
+      return { canvas: canvas, fileName: fileName, dayLabel: dayLabel, count: list.length, titleText: titleText };
+    }
+
+    function canvasToBlobPromise(canvas) {
+      return new Promise(function (resolve, reject) {
+        canvas.toBlob(function (blob) {
+          if (blob) resolve(blob);
+          else reject(new Error('blob failed'));
+        }, 'image/png');
+      });
+    }
+
+    // 匯出當日行程長圖
+    function exportRouteImage() {
+      const day = _routeDay || 1;
+      const built = buildRouteDayImage(day);
+      if (!built) {
+        showToast('此日沒有行程，請先選擇有戶口的日子');
+        return;
+      }
+      canvasToBlobPromise(built.canvas).then(function (blob) {
+        const file = new File([blob], built.fileName, { type: 'image/png' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           navigator.share({
             files: [file],
-            title: dayLabel + ' 行程',
-            text: dayLabel + ' 行程（' + list.length + ' 戶）'
+            title: built.dayLabel + ' 行程',
+            text: built.titleText + '（' + built.count + ' 戶）'
           }).then(function () {
             showToast('已分享長圖');
           }).catch(function () {
-            downloadRouteImageBlob(blob, fileName);
+            downloadRouteImageBlob(blob, built.fileName);
           });
         } else {
-          downloadRouteImageBlob(blob, fileName);
+          downloadRouteImageBlob(blob, built.fileName);
         }
-      }, 'image/png');
+      }).catch(function () {
+        showToast('產生圖片失敗');
+      });
+    }
+
+    // 匯出星期一至六全部有行程的長圖（逐張下載）
+    async function exportAllRouteImages() {
+      const jobs = [];
+      for (let d = 1; d <= 6; d++) {
+        const built = buildRouteDayImage(d);
+        if (built) jobs.push(built);
+      }
+      if (!jobs.length) {
+        showToast('一至六都沒有行程');
+        return;
+      }
+      showToast('正在匯出 ' + jobs.length + ' 張長圖…');
+      let ok = 0;
+      for (let i = 0; i < jobs.length; i++) {
+        try {
+          const blob = await canvasToBlobPromise(jobs[i].canvas);
+          downloadRouteImageBlob(blob, jobs[i].fileName);
+          ok++;
+          // 稍隔開，避免瀏覽器合併下載
+          await new Promise(function (r) { setTimeout(r, 350); });
+        } catch (e) {}
+      }
+      showToast('已匯出 ' + ok + ' 張行程長圖（一至六）');
     }
 
     function downloadRouteImageBlob(blob, fileName) {
