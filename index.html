@@ -4430,6 +4430,56 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       checkOrderAdvice(prodId);
     }
 
+    function closeSuggestDetail() {
+      const m = $('suggestDetailModal');
+      if (m) m.style.display = 'none';
+    }
+
+    function showSuggestDetail(prodId) {
+      const modal = $('suggestDetailModal');
+      const body = $('suggestDetailBody');
+      if (!modal || !body) {
+        showToast('詳情視窗未就緒');
+        return;
+      }
+      const sug = lastSuggestPacks[prodId];
+      const p = PRODUCTS.find(function (x) { return x.id === prodId; });
+      const pname = p ? p.name : prodId;
+      modal.style.display = 'flex';
+
+      if (!sug) {
+        body.innerHTML = '<div><strong>' + pname + '</strong></div>' +
+          '<div style="margin-top:8px;">請先選擇店舖並填寫今次存貨，先計算出建議後再查看。</div>';
+        return;
+      }
+
+      const detailUnit = isBottleUnit(prodId) ? '支' : '條';
+      const lines = [];
+      lines.push('<div style="font-size:1.15rem;font-weight:700;margin-bottom:10px;">建議落貨：<span style="color:var(--primary);">' +
+        sug.strips + ' ' + detailUnit + '</span></div>');
+      lines.push('<div style="font-size:0.9rem;margin-bottom:10px;">今次存貨 <strong>' + sug.curStock +
+        '</strong>　·　' + (sug.nextHint || '—') + '（約 ' + sug.daysNext + ' 天）</div>');
+
+      const reasons = [];
+      if (sug.lastSoldQty != null) reasons.push('上段銷量 ' + Math.round(sug.lastSoldQty) +
+        (sug.lastGap ? '（間隔 ' + sug.lastGap + ' 日）' : ''));
+      if (sug.expectedUntilNext != null) reasons.push('預計到下次約賣 ' + Math.round(sug.expectedUntilNext));
+      reasons.push('安全庫存 ' + (sug.minBuf != null ? sug.minBuf : getMinBuffer(prodId)));
+      if (sug.targetPrice != null) reasons.push('參考價 ' + formatPriceLabel(prodId, sug.targetPrice));
+      if (sug.dailyRate != null) reasons.push('估算日均約 ' + Math.round(sug.dailyRate * 10) / 10);
+      if (sug.dayPatternNote) reasons.push(sug.dayPatternNote);
+      if (sug.expNote) reasons.push(sug.expNote);
+      if (sug.scheduleSplitNote) reasons.push(sug.scheduleSplitNote);
+      if (sug.histNote) reasons.push(sug.histNote);
+      if (sug.discountSalesNote) reasons.push(sug.discountSalesNote);
+      if (sug.priceRiseSoon) reasons.push('偵測到即將轉貴');
+
+      lines.push('<div style="background:#fafafa;border-radius:10px;padding:10px;font-size:0.88rem;line-height:1.6;">' +
+        reasons.map(function (x) { return '· ' + x; }).join('<br>') + '</div>');
+      lines.push('<div style="font-size:0.78rem;color:var(--muted);margin-top:10px;">最終請以現場情況為準。</div>');
+      body.innerHTML = lines.join('');
+    }
+
     function checkOrderAdvice(prodId) {
       const adviceEl = $(`orderAdvice-${prodId}`);
       if (!adviceEl) return;
@@ -7128,7 +7178,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     init();
   </script>
 
-  <div id="suggestDetailModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999; align-items:flex-end; justify-content:center;">
+  <div id="suggestDetailModal" onclick="if(event.target===this)closeSuggestDetail()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999; align-items:flex-end; justify-content:center;">
     <div style="background:#fff; width:100%; max-width:520px; max-height:85vh; overflow:auto; border-radius:16px 16px 0 0; padding:16px 16px 28px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <div style="font-weight:700; font-size:1.05rem; color:var(--primary);">建議落貨詳情</div>
