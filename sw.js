@@ -1,5 +1,5 @@
-// stock-v10：網絡優先，更新 App 唔使清網站資料（localStorage 保留）
-const CACHE = 'stock-v10';
+// stock-v11：網絡優先；強制刷新舊快取（一至六行程改為單張合併長圖）
+const CACHE = 'stock-v11';
 const ASSETS = [
   './',
   './index.html',

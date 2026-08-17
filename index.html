@@ -6917,21 +6917,14 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       ctx.fillText('按各日編號順序到店。', pad, y);
 
       const fileName = (regionName ? regionName + '_' : '') + '一至六行程.png';
+      // 只下載「一張」合併圖，唔用 share（避免系統行為混亂），亦唔會逐日下載
       canvasToBlobPromise(canvas).then(function (blob) {
-        const file = new File([blob], fileName, { type: 'image/png' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          navigator.share({
-            files: [file],
-            title: mainTitle,
-            text: mainTitle + '（' + totalStops + ' 戶）'
-          }).then(function () {
-            showToast('已分享一至六行程長圖');
-          }).catch(function () {
-            downloadRouteImageBlob(blob, fileName);
-          });
-        } else {
-          downloadRouteImageBlob(blob, fileName);
+        if (!blob) {
+          showToast('產生圖片失敗');
+          return;
         }
+        downloadRouteImageBlob(blob, fileName);
+        showToast('已下載 1 張：一至六合併行程長圖');
       }).catch(function () {
         showToast('產生圖片失敗');
       });
@@ -7062,7 +7055,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=10').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js?v=11').then(function (reg) {
         // 每次打開檢查更新，唔使清網站資料
         try { reg.update(); } catch (e) {}
         if (reg.waiting) {
