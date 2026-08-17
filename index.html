@@ -550,7 +550,7 @@
             <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">＋ 新增</button>
           </div>
           <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRouteImage()">🖼️ 匯出當日行程長圖</button>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#2e7d32;" onclick="exportAllRouteImages()">🖼️ 匯出一至六全部長圖</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#2e7d32;" onclick="exportAllRouteImages()">🖼️ 匯出一至六行程（一張圖）</button>
           <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRegionRoutesJSON()">💾 匯出本區行程資料</button>
           <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="triggerImportRegionRoutes()">📥 匯入行程資料</button>
           <input type="file" id="routeImportFile" accept="application/json,.json" class="hidden" style="display:none;" onchange="onRouteImportFile(event)">
@@ -6785,29 +6785,156 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       });
     }
 
-    // 匯出星期一至六全部有行程的長圖（逐張下載）
-    async function exportAllRouteImages() {
-      const jobs = [];
+    // 匯出星期一至六全部行程為「一張」長圖
+    function exportAllRouteImages() {
+      const routes = loadRoutes();
+      const days = [];
+      let totalStops = 0;
       for (let d = 1; d <= 6; d++) {
-        const built = buildRouteDayImage(d);
-        if (built) jobs.push(built);
+        const list = routes[d] || [];
+        days.push({ day: d, list: list, label: '星期' + DAY_NAMES[d] });
+        totalStops += list.length;
       }
-      if (!jobs.length) {
+      if (totalStops === 0) {
         showToast('一至六都沒有行程');
         return;
       }
-      showToast('正在匯出 ' + jobs.length + ' 張長圖…');
-      let ok = 0;
-      for (let i = 0; i < jobs.length; i++) {
-        try {
-          const blob = await canvasToBlobPromise(jobs[i].canvas);
-          downloadRouteImageBlob(blob, jobs[i].fileName);
-          ok++;
-          // 稍隔開，避免瀏覽器合併下載
-          await new Promise(function (r) { setTimeout(r, 350); });
-        } catch (e) {}
-      }
-      showToast('已匯出 ' + ok + ' 張行程長圖（一至六）');
+
+      const regionName = (typeof getCurrentRegion === 'function' && getCurrentRegion())
+        ? (getCurrentRegion().name || '') : '';
+      const genTime = new Date().toLocaleString('zh-HK', { hour12: false });
+      const scale = 2;
+      const width = 420;
+      const pad = 20;
+      const topTitleH = 40;
+      const topMetaH = 26;
+      const dayHeaderH = 34;
+      const headH = 32;
+      const rowH = 34;
+      const dayGap = 16;
+      const footH = 28;
+
+      let bodyH = 0;
+      days.forEach(function (d) {
+        bodyH += dayHeaderH;
+        if (d.list.length) {
+          bodyH += headH + d.list.length * rowH;
+        } else {
+          bodyH += 28; // 「無行程」一行
+        }
+        bodyH += dayGap;
+      });
+      const height = pad + topTitleH + topMetaH + bodyH + footH + pad;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      const mainTitle = regionName ? (regionName + ' · 一至六行程') : '一至六行程';
+      ctx.fillStyle = '#E60012';
+      ctx.font = 'bold 22px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText(mainTitle, pad, pad);
+
+      ctx.fillStyle = '#888888';
+      ctx.font = '13px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.fillText('共 ' + totalStops + ' 戶　·　' + genTime, pad, pad + topTitleH);
+
+      let y = pad + topTitleH + topMetaH;
+
+      days.forEach(function (d) {
+        // 日標題列
+        ctx.fillStyle = '#E60012';
+        ctx.fillRect(pad, y, width - pad * 2, dayHeaderH);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px "PingFang TC","Microsoft JhengHei",sans-serif';
+        ctx.textBaseline = 'middle';
+        const dayTitle = d.label + (d.list.length ? ('（' + d.list.length + ' 戶）') : '（無）');
+        ctx.fillText(dayTitle, pad + 12, y + dayHeaderH / 2);
+        y += dayHeaderH;
+
+        if (!d.list.length) {
+          ctx.fillStyle = '#f5f5f5';
+          ctx.fillRect(pad, y, width - pad * 2, 28);
+          ctx.fillStyle = '#999999';
+          ctx.font = '14px "PingFang TC","Microsoft JhengHei",sans-serif';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('沒有行程', pad + 12, y + 14);
+          y += 28 + dayGap;
+          return;
+        }
+
+        // 表頭
+        ctx.fillStyle = '#fff0f0';
+        ctx.fillRect(pad, y, width - pad * 2, headH);
+        ctx.fillStyle = '#E60012';
+        ctx.font = 'bold 13px "PingFang TC","Microsoft JhengHei",sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('#', pad + 12, y + headH / 2);
+        ctx.fillText('戶口', pad + 48, y + headH / 2);
+        y += headH;
+
+        d.list.forEach(function (item, i) {
+          if (i % 2 === 1) {
+            ctx.fillStyle = '#fafafa';
+            ctx.fillRect(pad, y, width - pad * 2, rowH);
+          }
+          ctx.strokeStyle = '#eeeeee';
+          ctx.beginPath();
+          ctx.moveTo(pad, y + rowH);
+          ctx.lineTo(width - pad, y + rowH);
+          ctx.stroke();
+
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#E60012';
+          ctx.font = 'bold 14px "PingFang TC","Microsoft JhengHei",sans-serif';
+          ctx.fillText(String(i + 1), pad + 12, y + rowH / 2);
+
+          ctx.fillStyle = '#222222';
+          ctx.font = '14px "PingFang TC","Microsoft JhengHei",sans-serif';
+          let name = (item && item.name) ? String(item.name) : '';
+          const maxW = width - pad * 2 - 56;
+          const fullName = name;
+          while (name.length > 1 && ctx.measureText(name).width > maxW) {
+            name = name.slice(0, -1);
+          }
+          if (name !== fullName && name.length > 0) name = name.slice(0, -1) + '…';
+          ctx.fillText(name, pad + 48, y + rowH / 2);
+          y += rowH;
+        });
+
+        y += dayGap;
+      });
+
+      ctx.fillStyle = '#999999';
+      ctx.font = '12px "PingFang TC","Microsoft JhengHei",sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText('按各日編號順序到店。', pad, y);
+
+      const fileName = (regionName ? regionName + '_' : '') + '一至六行程.png';
+      canvasToBlobPromise(canvas).then(function (blob) {
+        const file = new File([blob], fileName, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: mainTitle,
+            text: mainTitle + '（' + totalStops + ' 戶）'
+          }).then(function () {
+            showToast('已分享一至六行程長圖');
+          }).catch(function () {
+            downloadRouteImageBlob(blob, fileName);
+          });
+        } else {
+          downloadRouteImageBlob(blob, fileName);
+        }
+      }).catch(function () {
+        showToast('產生圖片失敗');
+      });
     }
 
     function downloadRouteImageBlob(blob, fileName) {
