@@ -4194,25 +4194,39 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       let bias = (fc && fc.bias != null) ? fc.bias : 1;
       let fcSamples = (fc && fc.samples) ? fc.samples : 0;
 
-      // 合成日均：優先同價歷史／平滑；上段只在同價時參考
+      // 合成日均：現場上段銷量優先（避免特價熱賣被歷史／平滑拉低變成建議 0）
       let dailyRate = null;
-      if (smoothDaily != null && histDaily != null) {
-        dailyRate = smoothDaily * 0.6 + histDaily * 0.4;
-      } else if (smoothDaily != null) {
-        dailyRate = smoothDaily;
-      } else if (histDaily != null && justEndedDaily != null && samePriceAsLast) {
-        dailyRate = histDaily * 0.6 + justEndedDaily * 0.4;
+      if (justEndedDaily != null && (samePriceAsLast || lastPeriodPrice == null || targetPrice == null)) {
+        // 同價或未有完整價錢：以今段實績為主
+        if (histDaily != null) {
+          dailyRate = justEndedDaily * 0.7 + histDaily * 0.3;
+        } else if (smoothDaily != null) {
+          dailyRate = justEndedDaily * 0.75 + smoothDaily * 0.25;
+        } else {
+          dailyRate = justEndedDaily;
+        }
+      } else if (justEndedDaily != null && !samePriceAsLast) {
+        // 已轉價：新價有歷史用新價；否則上段打個折參考，絕不全丟
+        if (histDaily != null) {
+          dailyRate = histDaily * 0.65 + justEndedDaily * 0.35;
+        } else {
+          dailyRate = justEndedDaily * 0.55;
+          histNote = (histNote ? histNote + '；' : '') + '售價有變，上段銷量已打折參考';
+        }
+      } else if (histDaily != null && smoothDaily != null) {
+        dailyRate = smoothDaily * 0.5 + histDaily * 0.5;
       } else if (histDaily != null) {
         dailyRate = histDaily;
-      } else if (justEndedDaily != null && samePriceAsLast) {
-        dailyRate = justEndedDaily;
-      } else if (justEndedDaily != null && !samePriceAsLast) {
-        histNote = (histNote ? histNote + '；' : '') + '售價已變，不沿用上段銷量';
+      } else if (smoothDaily != null) {
+        dailyRate = smoothDaily;
       }
 
-      // bias：樣本少時唔用力拉
+      // bias：樣本少時唔用力拉；有強勁上段實績時唔好被 bias 壓低
       if (dailyRate != null && fcSamples >= 3 && bias != null && Math.abs(bias - 1) > 0.05) {
-        const b = Math.max(0.7, Math.min(1.25, bias));
+        let b = Math.max(0.75, Math.min(1.2, bias));
+        if (justEndedDaily != null && justEndedDaily > 0 && bias < 1 && dailyRate < justEndedDaily * 0.5) {
+          b = Math.max(b, 0.9); // 避免把熱賣壓得太低
+        }
         dailyRate = dailyRate * b;
         histNote = (histNote ? histNote + '；' : '') + '誤差校正×' + (Math.round(b * 100) / 100);
       }
@@ -4253,8 +4267,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           const daysToChange = Math.round((new Date(upcomingMeta.upcomingChangeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
           if (Number(upcomingMeta.upcomingPrice) > Number(targetPrice) * 1.02 && daysToChange <= 7) {
             priceRiseSoon = true;
-            expectedUntilNext *= 0.7;
-            scheduleSplitNote = '即將轉貴，已減少預估';
+            // 只輕微下調；熱賣中唔好再大力削減
+            const strongSales = justEndedDaily != null && justEndedDaily * 7 > minBuf;
+            expectedUntilNext *= strongSales ? 0.9 : 0.75;
+            scheduleSplitNote = '即將轉貴，預估已略減';
             histNote = (histNote ? histNote + '；' : '') + scheduleSplitNote;
           }
         }
@@ -4266,11 +4282,11 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (dailyRate != null) dailyRate *= freshFactor;
       }
 
-      // 全店折扣段
+      // 全店折扣段：只略減，避免熱賣變 0
       if (typeof _salesPeriodHasDiscount !== 'undefined' && _salesPeriodHasDiscount && expectedUntilNext != null) {
-        discountSalesFactor = 0.65;
+        discountSalesFactor = 0.8;
         expectedUntilNext *= discountSalesFactor;
-        discountSalesNote = '上段含全店折扣，已按約65%估算';
+        discountSalesNote = '上段含全店折扣，已略為保守';
       }
 
       // 無任何依據：極保守
@@ -4283,17 +4299,29 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
       expectedUntilNext = Math.max(0, expectedUntilNext || 0);
 
-      // ★ 硬上限：唔好遠超「上段按日均放大」—— 防止日均被錯誤間隔放大後建議離譜
-      if (lastSoldQty != null && lastGap != null && lastGap > 0 && samePriceAsLast) {
+      // ★ 下限：有上段實績時，預估唔可以低過「按上段節奏 × 下次間隔」太多
+      // （修 LT／十支裝特價賣好多卻建議 0）
+      if (lastSoldQty != null && lastSoldQty > 0 && lastGap != null && lastGap > 0) {
+        let floorMul = samePriceAsLast || lastPeriodPrice == null ? 0.85 : 0.5;
+        if (sellout) floorMul = Math.max(floorMul, 0.95);
+        const floor = lastSoldQty * (daysNext / lastGap) * floorMul;
+        if (expectedUntilNext < floor) {
+          expectedUntilNext = floor;
+          histNote = (histNote ? histNote + '；' : '') + '已按上段銷量設下限';
+        }
+      }
+
+      // ★ 上限：唔好遠超上段節奏（修五支裝建議 21 條）
+      if (lastSoldQty != null && lastSoldQty > 0 && lastGap != null && lastGap > 0) {
         const scaled = lastSoldQty * (daysNext / lastGap);
-        const capMul = sellout ? 1.8 : 1.35;
+        const capMul = sellout ? 1.35 : 1.15;
         const cap = scaled * capMul;
         if (expectedUntilNext > cap) {
-          histNote = (histNote ? histNote + '；' : '') + '已按上段銷量封頂';
           expectedUntilNext = cap;
+          histNote = (histNote ? histNote + '；' : '') + '已按上段銷量封頂';
         }
-      } else if (lastSoldQty != null && samePriceAsLast) {
-        const cap = lastSoldQty * (sellout ? 1.8 : 1.4);
+      } else if (lastSoldQty != null && lastSoldQty > 0) {
+        const cap = lastSoldQty * (sellout ? 1.4 : 1.2);
         if (expectedUntilNext > cap) {
           expectedUntilNext = cap;
           histNote = (histNote ? histNote + '；' : '') + '已按上段銷量封頂';
@@ -4327,25 +4355,34 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       } else if (weakSeller && remainToday != null && remainToday < 26) {
         adjMinBuf = Math.ceil(minBuf / 2);
       }
+      // 即將轉貴：可唔強留滿額安全庫存，但熱賣中唔好再把預估削到建議 0
       if (priceRiseSoon && !mustExchange(remainToday)) {
-        adjMinBuf = 0;
-        expectedUntilNext *= 0.65;
-        expNote = (expNote ? expNote + '·' : '') + '即將轉貴·不強留安全庫存';
+        const strongSales = justEndedDaily != null && justEndedDaily * daysNext > minBuf;
+        adjMinBuf = strongSales ? Math.ceil(minBuf * 0.5) : 0;
+        expNote = (expNote ? expNote + '·' : '') + (strongSales ? '即將轉貴·安全庫存減半' : '即將轉貴·不強留安全庫存');
       }
 
       // 目標：賣到下次後仍 ≥ 安全庫存
       const need = expectedUntilNext + adjMinBuf;
       let rawNeed = Math.max(0, need - curStock);
 
-      // 已夠安全庫存且預計銷量覆蓋得住 → 0
-      if (curStock >= adjMinBuf && curStock >= need) {
+      // 已夠 → 0（但上段賣得勁、今次存貨明顯偏低時，至少補回一部分）
+      if (curStock >= need && curStock >= adjMinBuf) {
         rawNeed = 0;
       }
+      if (rawNeed === 0 && lastSoldQty != null && lastGap != null && lastGap > 0 && !mustExchange(remainToday)) {
+        const paceNeed = lastSoldQty * (daysNext / lastGap) * 0.9 + adjMinBuf;
+        if (curStock < paceNeed) {
+          rawNeed = Math.max(0, paceNeed - curStock);
+          histNote = (histNote ? histNote + '；' : '') + '按上段銷售節奏補貨';
+        }
+      }
 
-      // ★ 落貨硬上限：單次建議唔好超過「上段銷量換算 + 1 條」太多（同價時）
-      if (lastSoldQty != null && samePriceAsLast) {
+      // ★ 落貨上限：約上段銷量按間隔放大後嘅 1.2 倍
+      if (lastSoldQty != null && lastSoldQty > 0) {
         const unit = getStripSize(prodId);
-        const orderCap = Math.max(lastSoldQty * 1.5 + unit, adjMinBuf + unit);
+        const gap = lastGap && lastGap > 0 ? lastGap : daysNext;
+        const orderCap = Math.max(lastSoldQty * (daysNext / gap) * 1.2 + unit, adjMinBuf + unit);
         if (rawNeed > orderCap) {
           rawNeed = orderCap;
           histNote = (histNote ? histNote + '；' : '') + '落貨已設合理上限';
