@@ -1435,12 +1435,26 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return '$' + v;
     }
     // 單排等值價（多排特價 ÷ 排數）
+    // 例：五支裝 $25 兩排 → 12.5；$35 三排 → 約 11.7；$15 單排 → 15
     function unitPriceEquiv(prodId, price) {
       if (price == null || isNaN(parseFloat(price))) return null;
       const v = parseFloat(price);
       const rows = multiBuyRows(prodId, v);
       if (rows > 1) return Math.round((v / rows) * 10) / 10;
       return v;
+    }
+    // 用「單排等值價」判斷轉貴／轉平（避免 $15→$25兩排 被誤判為轉貴）
+    function isUnitPriceRise(prodId, oldPrice, newPrice) {
+      const o = unitPriceEquiv(prodId, oldPrice);
+      const n = unitPriceEquiv(prodId, newPrice);
+      if (o == null || n == null || o <= 0) return false;
+      return n > o * 1.02;
+    }
+    function isUnitPriceDrop(prodId, oldPrice, newPrice) {
+      const o = unitPriceEquiv(prodId, oldPrice);
+      const n = unitPriceEquiv(prodId, newPrice);
+      if (o == null || n == null || o <= 0) return false;
+      return n < o * 0.98;
     }
 
     // 建議整數單位：十支裝 1條=5排；Joie／Y1000 以 1支為單位；其餘 1條=10排
@@ -4304,12 +4318,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         segments.forEach(function (seg) {
           let d = dailyRate;
           if (seg.isNew && targetPrice != null && seg.price != null) {
-            if (Number(seg.price) > Number(targetPrice) * 1.02) {
-              // 轉貴後銷量明顯下降
+            // 比較單排等值價：$25兩排(12.5) 對 $15 係轉平，唔係轉貴
+            if (isUnitPriceRise(prodId, targetPrice, seg.price)) {
               d = dailyRate * 0.35;
               priceRiseSoon = true;
               higherPriceInWindow = Number(seg.price);
-            } else if (Number(seg.price) < Number(targetPrice) * 0.98) {
+            } else if (isUnitPriceDrop(prodId, targetPrice, seg.price)) {
               d = dailyRate * 1.15;
               priceDropSoon = true;
             }
@@ -4323,10 +4337,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       } else if (upcomingMeta && upcomingMeta.upcomingPrice != null && targetPrice != null) {
         // 轉價喺下次到店之後但好近：貨會捱入貴價期 → 同樣要縮
         const daysToChange = Math.round((new Date(upcomingMeta.upcomingChangeDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
-        if (Number(upcomingMeta.upcomingPrice) > Number(targetPrice) * 1.02 && daysToChange <= 10) {
+        if (isUnitPriceRise(prodId, targetPrice, upcomingMeta.upcomingPrice) && daysToChange <= 10) {
           priceRiseSoon = true;
           higherPriceInWindow = Number(upcomingMeta.upcomingPrice);
-        } else if (Number(upcomingMeta.upcomingPrice) < Number(targetPrice) * 0.98 && daysToChange <= 10) {
+        } else if (isUnitPriceDrop(prodId, targetPrice, upcomingMeta.upcomingPrice) && daysToChange <= 10) {
           priceDropSoon = true;
         }
       }
@@ -4340,10 +4354,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           const np = parseFloat(nextSched.prices[prodId]);
           const daysToChange = Math.round((new Date(nextSched.effectiveDate + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
           if (daysToChange > 0 && daysToChange <= 10) {
-            if (np > targetPrice * 1.02) {
+            if (isUnitPriceRise(prodId, targetPrice, np)) {
               priceRiseSoon = true;
               higherPriceInWindow = np;
-            } else if (np < targetPrice * 0.98) {
+            } else if (isUnitPriceDrop(prodId, targetPrice, np)) {
               priceDropSoon = true;
             }
           }
@@ -4356,9 +4370,15 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (segments.length <= 1) {
           expectedUntilNext *= 0.55;
         }
-        nextPriceNote = higherPriceInWindow != null
-          ? ('下次價錢較貴（約 $' + higherPriceInWindow + '），宜縮貨')
-          : '下次價錢較貴，宜縮貨';
+        if (higherPriceInWindow != null) {
+          const u = unitPriceEquiv(prodId, higherPriceInWindow);
+          const rows = multiBuyRows(prodId, higherPriceInWindow);
+          nextPriceNote = (rows > 1)
+            ? ('下次單排等值約 $' + u + '（牌價 $' + higherPriceInWindow + '／' + rows + '排）較貴，宜縮貨')
+            : ('下次價錢較貴（約 $' + higherPriceInWindow + '），宜縮貨');
+        } else {
+          nextPriceNote = '下次價錢較貴，宜縮貨';
+        }
         if (!trendNote || trendNote.indexOf('縮') < 0) {
           trendNote = nextPriceNote;
         } else {
