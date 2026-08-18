@@ -5376,7 +5376,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       prodSalesRow += '<td class="num total">' + grandSales + '</td></tr>';
       prodOrderRow += '<td class="num total">' + grandOrder + '</td></tr>';
 
-      // —— 每日落貨：按日期+店舖 ——
+      // —— 每日落貨：按日期+店舖（每產品附當日售價）——
       const dailyMap = {}; // key = date|storeName
       details.forEach(function (d) {
         if (storeFilter && d.storeId !== storeFilter) return;
@@ -5384,7 +5384,16 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         if (storeIds.indexOf(d.storeId) < 0) return;
         const key = d.date + '|' + d.storeName;
         if (!dailyMap[key]) {
-          dailyMap[key] = { date: d.date, storeName: d.storeName, chain: d.chain, orders: {}, sales: {}, totalOrder: 0, totalSales: 0 };
+          dailyMap[key] = {
+            date: d.date,
+            storeName: d.storeName,
+            chain: d.chain,
+            orders: {},
+            sales: {},
+            dayPrice: {},
+            totalOrder: 0,
+            totalSales: 0
+          };
         }
         const row = dailyMap[key];
         const oid = d.prodId || d.product;
@@ -5394,16 +5403,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           row.totalSales += Number(d.sales) || 0;
         }
         row.totalOrder += Number(d.order) || 0;
+        // 當日售價（該次到店記錄的貨架價）
+        if (d.price) row.dayPrice[oid] = d.price;
       });
       const dailyRows = Object.keys(dailyMap).map(function (k) { return dailyMap[k]; })
         .sort(function (a, b) {
-          if (a.date !== b.date) return b.date.localeCompare(a.date); // 新→舊
+          if (a.date !== b.date) return b.date.localeCompare(a.date);
           return (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
         });
 
+      // 每產品三欄：售價｜落貨｜銷量
       let dailyHead = '<tr><th>日期</th><th>店舖</th><th>集團</th>';
-      PRODUCTS.forEach(function (p) { dailyHead += '<th>' + productShortCode(p.id) + '落貨</th>'; });
-      PRODUCTS.forEach(function (p) { dailyHead += '<th>' + productShortCode(p.id) + '銷量</th>'; });
+      PRODUCTS.forEach(function (p) {
+        const c = productShortCode(p.id);
+        dailyHead += '<th>' + c + '售價</th><th>' + c + '落貨</th><th>' + c + '銷量</th>';
+      });
       dailyHead += '<th>合計落貨</th><th>合計銷量</th></tr>';
       let dailyBody = '';
       dailyRows.forEach(function (row) {
@@ -5412,17 +5426,19 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         dailyBody += '<td class="store">' + escapeXml(row.storeName) + '</td>';
         dailyBody += '<td>' + escapeXml(row.chain || '') + '</td>';
         PRODUCTS.forEach(function (p) {
-          dailyBody += '<td class="num">' + (row.orders[p.id] || 0) + '</td>';
-        });
-        PRODUCTS.forEach(function (p) {
-          dailyBody += '<td class="num">' + (row.sales[p.id] || 0) + '</td>';
+          const dayP = row.dayPrice[p.id] || '—';
+          const ord = row.orders[p.id] || 0;
+          const sal = row.sales[p.id] || 0;
+          dailyBody += '<td class="num">' + escapeXml(String(dayP)) + '</td>';
+          dailyBody += '<td class="num">' + ord + '</td>';
+          dailyBody += '<td class="num">' + sal + '</td>';
         });
         dailyBody += '<td class="num total">' + Math.round(row.totalOrder) + '</td>';
         dailyBody += '<td class="num total">' + Math.round(row.totalSales) + '</td>';
         dailyBody += '</tr>';
       });
       if (!dailyBody) {
-        dailyBody = '<tr><td colspan="' + (5 + PRODUCTS.length * 2) + '" style="text-align:center;color:#888;">此期間沒有每日記錄</td></tr>';
+        dailyBody = '<tr><td colspan="' + (5 + PRODUCTS.length * 3) + '" style="text-align:center;color:#888;">此期間沒有每日記錄</td></tr>';
       }
 
       // —— 不同價錢銷售：產品 + 售價 ——
@@ -5548,7 +5564,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
   </table>
 
   <h2>每日落貨／銷量明細</h2>
-  <p class="note">按到店日列出每間店當日落貨與銷量（銷量＝相對上次到店）。</p>
+  <p class="note">按到店日列出每間店：各產品<strong>當日售價</strong>、落貨、銷量（銷量＝相對上次到店）。</p>
   <table>
     <thead>${dailyHead}</thead>
     <tbody>${dailyBody}</tbody>
