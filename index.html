@@ -5032,15 +5032,23 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
             agg.lastDate = r.date;
             if (price != null) agg.lastPrice = price;
 
+            // 銷量發生在「上一段」：歸因用上一段售價（prev 價錢）
+            const salesPriceRaw = (prevPr && prevPr.price != null) ? prevPr.price
+              : (price != null ? price : null);
             details.push({
               date: r.date,
+              storeId: sid,
               storeName,
               chain,
+              prodId: p.id,
               product: shortName,
               stock: stock != null ? stock : '',
               sales: sales != null ? sales : '',
               order: order || 0,
               price: price != null ? formatPriceLabel(p.id, price) : '',
+              priceRaw: price,
+              salesPrice: salesPriceRaw != null ? formatPriceLabel(p.id, salesPriceRaw) : '',
+              salesPriceRaw: salesPriceRaw,
               total: total
             });
           });
@@ -5368,6 +5376,104 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       prodSalesRow += '<td class="num total">' + grandSales + '</td></tr>';
       prodOrderRow += '<td class="num total">' + grandOrder + '</td></tr>';
 
+      // —— 每日落貨：按日期+店舖 ——
+      const dailyMap = {}; // key = date|storeName
+      details.forEach(function (d) {
+        if (storeFilter && d.storeId !== storeFilter) return;
+        if (!storeIds.length) return;
+        if (storeIds.indexOf(d.storeId) < 0) return;
+        const key = d.date + '|' + d.storeName;
+        if (!dailyMap[key]) {
+          dailyMap[key] = { date: d.date, storeName: d.storeName, chain: d.chain, orders: {}, sales: {}, totalOrder: 0, totalSales: 0 };
+        }
+        const row = dailyMap[key];
+        const oid = d.prodId || d.product;
+        row.orders[oid] = (row.orders[oid] || 0) + (Number(d.order) || 0);
+        if (d.sales !== '' && d.sales != null) {
+          row.sales[oid] = (row.sales[oid] || 0) + (Number(d.sales) || 0);
+          row.totalSales += Number(d.sales) || 0;
+        }
+        row.totalOrder += Number(d.order) || 0;
+      });
+      const dailyRows = Object.keys(dailyMap).map(function (k) { return dailyMap[k]; })
+        .sort(function (a, b) {
+          if (a.date !== b.date) return b.date.localeCompare(a.date); // 新→舊
+          return (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
+        });
+
+      let dailyHead = '<tr><th>日期</th><th>店舖</th><th>集團</th>';
+      PRODUCTS.forEach(function (p) { dailyHead += '<th>' + productShortCode(p.id) + '落貨</th>'; });
+      PRODUCTS.forEach(function (p) { dailyHead += '<th>' + productShortCode(p.id) + '銷量</th>'; });
+      dailyHead += '<th>合計落貨</th><th>合計銷量</th></tr>';
+      let dailyBody = '';
+      dailyRows.forEach(function (row) {
+        dailyBody += '<tr>';
+        dailyBody += '<td>' + escapeXml(row.date) + '</td>';
+        dailyBody += '<td class="store">' + escapeXml(row.storeName) + '</td>';
+        dailyBody += '<td>' + escapeXml(row.chain || '') + '</td>';
+        PRODUCTS.forEach(function (p) {
+          dailyBody += '<td class="num">' + (row.orders[p.id] || 0) + '</td>';
+        });
+        PRODUCTS.forEach(function (p) {
+          dailyBody += '<td class="num">' + (row.sales[p.id] || 0) + '</td>';
+        });
+        dailyBody += '<td class="num total">' + Math.round(row.totalOrder) + '</td>';
+        dailyBody += '<td class="num total">' + Math.round(row.totalSales) + '</td>';
+        dailyBody += '</tr>';
+      });
+      if (!dailyBody) {
+        dailyBody = '<tr><td colspan="' + (5 + PRODUCTS.length * 2) + '" style="text-align:center;color:#888;">此期間沒有每日記錄</td></tr>';
+      }
+
+      // —— 不同價錢銷售：產品 + 售價 ——
+      const priceMap = {}; // key = prodId|priceLabel
+      details.forEach(function (d) {
+        if (storeFilter && d.storeId !== storeFilter) return;
+        if (storeIds.indexOf(d.storeId) < 0) return;
+        if (d.sales === '' || d.sales == null) return;
+        const salesQty = Number(d.sales);
+        if (isNaN(salesQty) || salesQty < 0) return;
+        const priceLabel = d.salesPrice || d.price || '（無價錢）';
+        const key = (d.prodId || d.product) + '|' + priceLabel;
+        if (!priceMap[key]) {
+          priceMap[key] = {
+            prodId: d.prodId,
+            product: d.product,
+            priceLabel: priceLabel,
+            sales: 0,
+            times: 0,
+            order: 0
+          };
+        }
+        priceMap[key].sales += salesQty;
+        priceMap[key].times += 1;
+        priceMap[key].order += Number(d.order) || 0;
+      });
+      const priceRows = Object.keys(priceMap).map(function (k) { return priceMap[k]; })
+        .sort(function (a, b) {
+          const pa = PRODUCTS.findIndex(function (x) { return x.id === a.prodId; });
+          const pb = PRODUCTS.findIndex(function (x) { return x.id === b.prodId; });
+          if (pa !== pb) return pa - pb;
+          return b.sales - a.sales;
+        });
+
+      let priceHead = '<tr><th>產品</th><th>售價（銷售期）</th><th>銷量（支）</th><th>次數</th><th>均量／次</th><th>同期落貨（支）</th></tr>';
+      let priceBody = '';
+      priceRows.forEach(function (row) {
+        const avg = row.times ? Math.round(row.sales / row.times) : 0;
+        priceBody += '<tr>';
+        priceBody += '<td>' + escapeXml(row.product) + '</td>';
+        priceBody += '<td>' + escapeXml(row.priceLabel) + '</td>';
+        priceBody += '<td class="num total">' + Math.round(row.sales) + '</td>';
+        priceBody += '<td class="num">' + row.times + '</td>';
+        priceBody += '<td class="num">' + avg + '</td>';
+        priceBody += '<td class="num">' + Math.round(row.order) + '</td>';
+        priceBody += '</tr>';
+      });
+      if (!priceBody) {
+        priceBody = '<tr><td colspan="6" style="text-align:center;color:#888;">此期間沒有可統計的價錢銷售</td></tr>';
+      }
+
       const html = `<!DOCTYPE html>
 <html lang="zh-HK">
 <head>
@@ -5440,6 +5546,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     <thead>${sumHead}</thead>
     <tbody>${sumBody}</tbody>
   </table>
+
+  <h2>每日落貨／銷量明細</h2>
+  <p class="note">按到店日列出每間店當日落貨與銷量（銷量＝相對上次到店）。</p>
+  <table>
+    <thead>${dailyHead}</thead>
+    <tbody>${dailyBody}</tbody>
+  </table>
+
+  <h2>不同價錢銷售情況</h2>
+  <p class="note">按「銷售期售價」統計（即上一段貨架價）。可比較特價與正價銷量差異。</p>
+  <table>
+    <thead>${priceHead}</thead>
+    <tbody>${priceBody}</tbody>
+  </table>
+
   <p class="note">單位：支。Y5=五支裝、Y10=十支裝、LT、MU=青提（Y5/LT/MU×5，Y10×10）。銷量＝上次總存−今次現存。</p>
   <p class="note">${escapeXml(cmpNote)}</p>
   <p class="note">本報告由「存貨管理」App 自動產生，僅供內部參考。</p>
