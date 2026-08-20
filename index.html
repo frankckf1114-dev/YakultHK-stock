@@ -5408,8 +5408,10 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       });
       const dailyRows = Object.keys(dailyMap).map(function (k) { return dailyMap[k]; })
         .sort(function (a, b) {
-          if (a.date !== b.date) return b.date.localeCompare(a.date);
-          return (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
+          // 先店舖，再日期（同店由新到舊）
+          const sc = (a.storeName || '').localeCompare(b.storeName || '', 'zh-HK');
+          if (sc !== 0) return sc;
+          return b.date.localeCompare(a.date);
         });
 
       // 每產品三欄：售價｜落貨｜銷量
