@@ -463,7 +463,7 @@
       </div>
 
       <div id="productsArea" class="hidden">
-        <div id="staleStockAlert" class="card" style="display:none; background:#fff5f5; border:1px solid #ffc9c9;">
+        <div id="staleStockAlert" class="card hidden" style="display:none !important; background:#fff5f5; border:1px solid #ffc9c9;">
           <div class="card-title" style="color:#c62828;">⚠️ 短到期／舊貨提示</div>
           <div id="staleStockAlertBody" style="font-size:0.9rem; margin-bottom:10px;"></div>
           <div class="btn-group" style="flex-wrap:wrap; gap:8px;">
@@ -593,7 +593,7 @@
 
     <!-- 設定頁 -->
     <div id="page-tools" class="hidden">
-<div class="card" id="expiryCard">
+<div class="card hidden" id="expiryCard" style="display:none !important;">
         <div class="card-title">📅 出貨到期日（每日每產品輸入一次）</div>
         <div id="expirySavedList" style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;line-height:1.6;"></div>
         <div style="margin-bottom:10px;">
@@ -696,7 +696,7 @@
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="importJSON()">匯入 JSON 備份</button>
         <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
         <button class="btn" style="background:#dc3545; color:white;" onclick="confirmClearAll()">清除所有資料（含同步設定）</button>
-        <p style="font-size:0.75rem;color:var(--muted);margin-top:6px;">會清空：歷史記錄、店舖清單、預計轉價、到期日、草稿、同步設定。方便其他地區重新開始。</p>
+        <p style="font-size:0.75rem;color:var(--muted);margin-top:6px;">會清空：歷史記錄、店舖清單、預計轉價、草稿、同步設定。方便其他地區重新開始。</p>
       </div>
       <div class="card">
         <div class="card-title">🗺️ 地區管理</div>
@@ -1544,10 +1544,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       return remainDays != null && !isNaN(remainDays) && remainDays <= 7;
     }
     function getProductExpiryInfo(prodId, recordDate) {
-      const exp = getExpiryForDate(recordDate)[prodId];
-      if (!exp) return null;
-      const remainToday = daysBetween(recordDate, exp);
-      return { expiry: exp, remainToday };
+      // 已停用出貨到期日功能
+      return null;
     }
     function getExpiryEditDate() {
       if ($('expiryDatePicker') && $('expiryDatePicker').value) return $('expiryDatePicker').value;
@@ -3653,67 +3651,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     let pendingStaleItems = []; // { storeId, prodId, name, remain, orderDate, expiry }
 
     function checkStaleStockForStore(storeId, date) {
-      pendingStaleItems = [];
+      // 已停用短到期提示
       const box = $('staleStockAlert');
-      const body = $('staleStockAlertBody');
-      if (!box || !body) return;
-
-      if (!storeId) {
-        box.style.display = 'none';
-        return;
-      }
-
-      const ack = loadExchangeAck();
-      const issues = [];
-
-      getStoreProducts(storeId).forEach(p => {
-        const key = ackKey(storeId, p.id, date);
-        if (ack[key] === 'exchanged' || ack[key] === 'dismiss') return;
-
-        const last = getLastOrderInfo(storeId, p.id, date);
-        if (!last || !last.expiry) return;
-
-        const remain = daysBetween(date, last.expiry);
-        if (remain == null) return;
-        // 剩餘 < 14 日（含更差）且距離上次落貨有一段時間未再落
-        if (remain < 14) {
-          // 檢查由上次落貨日至今天，中間有沒有再落過（已由 getLastOrderInfo 保證是最後一次）
-          const daysSinceOrder = daysBetween(last.orderDate, date);
-          issues.push({
-            storeId,
-            prodId: p.id,
-            name: p.name.replace('益力多', ''),
-            remain,
-            orderDate: last.orderDate,
-            expiry: last.expiry,
-            daysSinceOrder
-          });
-        }
-      });
-
-      pendingStaleItems = issues;
-
-      if (issues.length === 0) {
-        box.style.display = 'none';
-        return;
-      }
-
-      body.innerHTML = issues.map(it => {
-        const badge = it.remain <= 7
-          ? `<span style="color:#c62828;font-weight:700;">剩餘${it.remain}日·須報交換</span>`
-          : `<span style="color:#e65100;font-weight:700;">剩餘${it.remain}日</span>`;
-        return `<div style="margin-bottom:8px;padding:8px;background:#fff;border-radius:8px;">
-          <strong>${it.name}</strong>：上次落貨 ${it.orderDate}（${it.daysSinceOrder}天前）<br>
-          當時到期日 ${it.expiry} → 今天${badge}<br>
-          <span style="font-size:0.8rem;color:var(--muted);">請確認店內是否已將舊貨換成新貨，或需報交換。</span>
-        </div>`;
-      }).join('');
-
-      box.style.display = 'block';
-
-      // 嘗試系統通知（需用戶曾授權；iPhone 限制較多）
-      tryNotifyStale(issues, storeId);
+      if (box) box.style.display = 'none';
+      return;
     }
+
 
     function tryNotifyStale(issues, storeId) {
       if (!('Notification' in window)) return;
