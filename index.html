@@ -633,7 +633,7 @@
       <div class="card" id="storeDiscountLogCard">
         <div class="card-title">🏷 全店折扣記錄（參考用）</div>
         <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
-          記錄全店折扣日（例如全店 88 折）。下次到店時，若該段銷量期間包含折扣，銷量旁將顯示 🏷 標記。<strong>此記錄不會自動調整建議落貨數量。</strong>
+          記錄全店折扣日（例如全店 88 折）。下次到店時，若該段銷量期間包含折扣，銷量旁將顯示 🏷 標記。
         </p>
         <div id="storeDiscountLogList" style="font-size:0.78rem;margin-bottom:10px;"></div>
         <div style="margin-bottom:8px;">
@@ -3206,21 +3206,13 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       const orderBlock = `
         <div class="card" style="margin-bottom:12px;padding:12px;">
           <div class="card-title" style="margin-bottom:8px;">② 決定落貨</div>
-          <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">存貨記完後，再按建議決定落貨；最後一欄按 Enter 可儲存。</p>
+          <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">存貨記完後填寫落貨；最後一欄按 Enter 可儲存。</p>
           ${prods.map(p => `
             <div class="product-card" id="prod-order-${p.id}" style="margin-bottom:10px;">
               <div class="product-name">${p.name}</div>
-              <div class="info-row">
-                <span class="label">建議落貨
-                  <button type="button" onclick="showSuggestDetail('${p.id}')" title="為何這樣建議"
-                    style="margin-left:4px;border:1px solid var(--primary);color:var(--primary);background:#fff;border-radius:50%;width:22px;height:22px;font-size:0.75rem;font-weight:700;line-height:1;vertical-align:middle;padding:0;">?</button>
-                </span>
-                <span class="suggest" id="suggest-${p.id}">—</span>
-              </div>
               <div style="margin-top:6px;">
                 <label>實際落貨（${isBottleUnit(p.id) ? '支' : '排'}）</label>
-                <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="" oninput="checkOrderAdvice('${p.id}')">
-                <div class="order-advice" id="orderAdvice-${p.id}" style="font-size:0.8rem;margin-top:4px;color:var(--muted);"></div>
+                <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="">
               </div>
             </div>
           `).join('')}
@@ -7259,7 +7251,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=11').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js?v=12').then(function (reg) {
         // 每次打開檢查更新，唔使清網站資料
         try { reg.update(); } catch (e) {}
         if (reg.waiting) {
@@ -7295,7 +7287,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     init();
   </script>
 
-  <div id="suggestDetailModal" onclick="if(event.target===this)closeSuggestDetail()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999; align-items:flex-end; justify-content:center;">
+  <div id="suggestDetailModal" class="hidden" onclick="if(event.target===this)closeSuggestDetail()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999; align-items:flex-end; justify-content:center;">
     <div style="background:#fff; width:100%; max-width:520px; max-height:85vh; overflow:auto; border-radius:16px 16px 0 0; padding:16px 16px 28px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <div style="font-weight:700; font-size:1.05rem; color:var(--primary);">建議落貨詳情</div>
