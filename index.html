@@ -14,145 +14,204 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
   <title>存貨管理</title>
   <link rel="manifest" href="./manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <style>
     :root {
-      /* 香港益力多乳品有限公司官網風：紅白潔淨 */
       --primary: #E60012;
-      --primary-dark: #B8000E;
-      --primary-light: #FF4D5E;
-      --bg: #FAFAFA;
-      --card: #ffffff;
-      --text: #222222;
-      --muted: #6B6B6B;
-      --border: #EEEEEE;
-      --success: #2E7D32;
-      --warning: #F5A623;
-      --radius: 12px;
-      --shadow: 0 2px 10px rgba(230,0,18,0.06);
+      --primary-dark: #C10010;
+      --primary-soft: #FFF1F2;
+      --ink: #1A1A1C;
+      --muted: #6E6E76;
+      --subtle: #9A9AA3;
+      --bg: #F4F4F6;
+      --card: #FFFFFF;
+      --elevated: #FFFFFF;
+      --border: rgba(26,26,28,0.08);
+      --border-strong: rgba(26,26,28,0.14);
+      --success: #1B7A46;
+      --success-bg: #EAF6EE;
+      --warning: #B45309;
+      --warning-bg: #FFF7ED;
+      --danger: #C10010;
+      --danger-bg: #FFF1F2;
+      --radius-xs: 6px;
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-xl: 28px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --shadow: 0 1px 2px rgba(26,26,28,0.04), 0 8px 24px rgba(26,26,28,0.05);
+      --shadow-sm: 0 1px 2px rgba(26,26,28,0.06);
+      --font: "Noto Sans TC", "PingFang TC", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+        -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
     body {
-      font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans TC", "PingFang TC",
-        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: var(--font);
       background: var(--bg);
-      color: var(--text);
-      line-height: 1.55;
-      padding-bottom: 84px;
+      color: var(--ink);
+      line-height: 1.5;
+      padding-bottom: calc(76px + var(--safe-bottom));
       letter-spacing: 0.01em;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
     }
+    button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+
     header {
       background: #fff;
-      color: var(--text);
-      padding: 10px 14px 10px;
+      color: var(--ink);
+      padding: 10px 16px 12px;
+      padding-top: calc(10px + env(safe-area-inset-top, 0px));
       position: sticky;
       top: 0;
       z-index: 100;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.05);
-      border-bottom: 2px solid var(--primary);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
     }
     header .header-top {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
+      gap: 12px;
     }
     header .brand-row {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       min-width: 0;
       flex: 1;
     }
     header .logo {
-      width: 42px;
-      height: 42px;
+      width: 40px;
+      height: 40px;
       flex-shrink: 0;
+      filter: drop-shadow(0 2px 4px rgba(230,0,18,0.18));
     }
     header h1 {
-      font-size: 1.12rem;
+      font-size: 1.05rem;
       font-weight: 700;
-      line-height: 1.25;
-      color: var(--primary);
-      letter-spacing: 0.02em;
+      line-height: 1.2;
+      color: var(--ink);
+      letter-spacing: -0.02em;
     }
     header .subtitle {
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       color: var(--muted);
       margin-top: 2px;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.06em;
       font-weight: 500;
     }
     header .yakult-brand-logo {
-      height: 40px;
+      height: 36px;
       width: auto;
-      max-width: 110px;
+      max-width: 104px;
       object-fit: contain;
       flex-shrink: 0;
     }
-    header .tagline {
-      font-size: 0.65rem;
-      color: #fff;
-      background: var(--primary);
-      margin: 0 -14px;
-      padding: 6px 14px;
-      letter-spacing: 0.08em;
-      text-align: center;
-      font-weight: 500;
-    }
+
     .container {
       max-width: 640px;
       margin: 0 auto;
-      padding: 14px 14px 8px;
+      padding: 16px 16px 8px;
     }
+
     .card {
       background: var(--card);
-      border-radius: var(--radius);
+      border-radius: var(--radius-lg);
       padding: 18px 16px;
       margin-bottom: 14px;
       box-shadow: var(--shadow);
-      border: 1px solid rgba(0,0,0,0.03);
+      border: 1px solid var(--border);
     }
     .card-title {
-      font-size: 0.92rem;
+      font-size: 0.78rem;
       font-weight: 700;
       margin-bottom: 14px;
-      color: var(--primary);
+      color: var(--ink);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      letter-spacing: 0.03em;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #F0F0F0;
+      letter-spacing: 0.08em;
+      text-transform: none;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
     }
+    .card-title::before {
+      content: "";
+      display: inline-block;
+      width: 3px;
+      height: 14px;
+      background: var(--primary);
+      border-radius: 2px;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .card-title > span:first-child,
+    .card-title {
+      display: flex;
+      align-items: center;
+    }
+
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 0 0 12px;
+    }
+
     label {
       display: block;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
+      font-weight: 600;
       color: var(--muted);
-      margin-bottom: 4px;
+      margin-bottom: 6px;
+      letter-spacing: 0.04em;
     }
-    select, input[type="number"], input[type="text"], input[type="date"] {
+    select, input[type="number"], input[type="text"], input[type="date"], input[type="url"] {
       width: 100%;
-      padding: 11px 14px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
       font-size: 1rem;
-      background: #FAFAFA;
+      font-family: inherit;
+      background: #FAFAFB;
+      color: var(--ink);
       -webkit-appearance: none;
-      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+      appearance: none;
+      min-height: 46px;
+      transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background 0.15s var(--ease);
+    }
+    select {
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%236E6E76' d='M1 1l5 5 5-5'/></svg>");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 36px;
     }
     select:focus, input:focus {
       outline: none;
       border-color: var(--primary);
       background: #fff;
-      box-shadow: 0 0 0 3px rgba(230,0,18,0.12);
+      box-shadow: 0 0 0 4px rgba(230,0,18,0.12);
     }
+    input::placeholder { color: var(--subtle); }
+
     .row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 12px;
+      margin-bottom: 12px;
     }
     .row-3 {
       display: grid;
@@ -160,90 +219,136 @@
       gap: 8px;
       margin-bottom: 10px;
     }
+
     .product-card {
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 12px;
-      background: #fafafa;
+      border-radius: var(--radius-md);
+      padding: 14px;
+      margin-bottom: 10px;
+      background: #FBFBFC;
     }
     .product-name {
       font-weight: 700;
-      font-size: 1rem;
+      font-size: 0.95rem;
       margin-bottom: 10px;
-      color: var(--primary-dark);
+      color: var(--ink);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .product-name .price-chip {
+      font-weight: 600;
+      font-size: 0.75rem;
+      color: var(--primary);
+      background: var(--primary-soft);
+      padding: 3px 8px;
+      border-radius: 999px;
     }
     input.stock-input {
-      font-size: 1.35rem !important;
+      font-size: 1.5rem !important;
       font-weight: 700;
       font-variant-numeric: tabular-nums;
       padding: 12px 14px !important;
       text-align: center;
+      letter-spacing: -0.02em;
+      background: #fff !important;
     }
     .info-row {
       display: flex;
       justify-content: space-between;
-      font-size: 0.9rem;
+      align-items: center;
+      font-size: 0.88rem;
       margin-bottom: 6px;
     }
-    .info-row .label { color: var(--muted); }
-    .info-row .value { font-weight: 600; }
+    .info-row .label { color: var(--muted); font-weight: 500; }
+    .info-row .value { font-weight: 700; font-variant-numeric: tabular-nums; }
     .sold {
-      background: #fff3e0;
-      color: #e65100;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 600;
+      background: var(--warning-bg);
+      color: var(--warning);
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
     }
     .suggest {
-      background: #e8f5e9;
-      color: #2e7d32;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 600;
+      background: var(--success-bg);
+      color: var(--success);
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
     }
     .price-note {
       font-size: 0.8rem;
       color: var(--warning);
       margin-top: 6px;
-      padding: 6px 8px;
-      background: #fff8e1;
-      border-radius: 6px;
+      padding: 8px 10px;
+      background: var(--warning-bg);
+      border-radius: var(--radius-sm);
     }
+
+    .step-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .step-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      font-size: 0.72rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      padding: 12px 20px;
+      padding: 13px 18px;
       border: none;
       border-radius: 999px;
-      font-size: 0.95rem;
-      font-weight: 600;
+      font-size: 0.92rem;
+      font-weight: 650;
+      font-family: inherit;
       cursor: pointer;
-      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+      min-height: 46px;
       width: 100%;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.02em;
+      transition: transform 0.12s var(--ease), background 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s;
     }
     .btn:active { transform: scale(0.98); }
     .btn-primary {
       background: var(--primary);
-      color: white;
-      box-shadow: 0 4px 14px rgba(230,0,18,0.28);
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(230,0,18,0.28);
     }
     .btn-primary:active { background: var(--primary-dark); }
     .btn-secondary {
       background: #fff;
-      color: var(--text);
-      border: 1px solid var(--border);
+      color: var(--ink);
+      border: 1px solid var(--border-strong);
+      box-shadow: none;
     }
-    .btn-secondary:active { background: #f5f5f5; }
+    .btn-secondary:active { background: #F4F4F6; }
     .btn-success {
       background: var(--success);
-      color: white;
-      box-shadow: 0 4px 12px rgba(46,125,50,0.22);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(27,122,70,0.22);
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
     }
     .btn-group {
       display: grid;
@@ -259,61 +364,101 @@
     }
     .btn-sm-row {
       display: flex;
-      gap: 6px;
+      gap: 8px;
       margin-bottom: 10px;
     }
     .btn-sm-row .btn-sm {
       flex: 1;
       width: auto !important;
       min-width: 0;
-      padding: 8px 4px !important;
-      font-size: 0.78rem !important;
-      font-weight: 600;
+      min-height: 40px;
+      padding: 8px 8px !important;
+      font-size: 0.8rem !important;
+      font-weight: 650;
       letter-spacing: 0 !important;
       white-space: nowrap !important;
-      border-radius: 8px !important;
+      border-radius: 999px !important;
       line-height: 1.2;
     }
+    .btn-compact {
+      width: auto !important;
+      min-height: 36px;
+      padding: 7px 12px !important;
+      font-size: 0.8rem !important;
+    }
+
     .tabs {
       display: flex;
-      background: white;
-      border-radius: 10px;
+      background: #fff;
+      border-radius: var(--radius-md);
       overflow: hidden;
       margin-bottom: 12px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      border: 1px solid var(--border);
     }
     .tab {
       flex: 1;
       padding: 12px;
       text-align: center;
-      font-weight: 600;
-      font-size: 0.9rem;
+      font-weight: 650;
+      font-size: 0.88rem;
       background: white;
       border: none;
       cursor: pointer;
       color: var(--muted);
+      font-family: inherit;
     }
     .tab.active {
       background: var(--primary);
       color: white;
     }
+
+    .chip-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .chip {
+      border: 1px solid var(--border-strong);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 0.82rem;
+      font-weight: 650;
+      font-family: inherit;
+      min-height: 40px;
+      width: auto;
+    }
+    .chip.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
     .hidden { display: none !important; }
+
     .history-item {
       border-bottom: 1px solid var(--border);
-      padding: 12px 0;
+      padding: 14px 0;
     }
     .history-item:last-child { border-bottom: none; }
     .history-header {
       display: flex;
       justify-content: space-between;
-      font-weight: 600;
-      margin-bottom: 6px;
+      align-items: baseline;
+      font-weight: 700;
+      margin-bottom: 8px;
+      gap: 8px;
     }
-    .history-date { color: var(--primary); }
-    .history-detail {
-      font-size: 0.85rem;
+    .history-date {
       color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
     }
+    .history-detail { font-size: 0.85rem; color: var(--muted); }
+    .hist-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
     .hist-table {
       width: 100%;
       border-collapse: collapse;
@@ -322,20 +467,21 @@
       font-variant-numeric: tabular-nums;
     }
     .hist-table th, .hist-table td {
-      padding: 4px 3px;
+      padding: 6px 4px;
       text-align: center;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--border);
       white-space: nowrap;
     }
     .hist-table th {
-      color: var(--muted);
+      color: var(--subtle);
       font-weight: 600;
-      font-size: 0.72rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
     }
     .hist-table td.row-label {
       text-align: left;
-      font-weight: 600;
-      color: #444;
+      font-weight: 650;
+      color: var(--muted);
       padding-left: 0;
     }
     .hist-table tr.total-row td {
@@ -343,73 +489,146 @@
       color: var(--primary);
       border-bottom: none;
     }
+
     .empty {
       text-align: center;
-      padding: 40px 20px;
+      padding: 36px 16px;
       color: var(--muted);
+      font-size: 0.9rem;
     }
+    .empty-illust {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 12px;
+      opacity: 0.55;
+    }
+
     .toast {
       position: fixed;
-      bottom: 90px;
+      bottom: calc(90px + var(--safe-bottom));
       left: 50%;
-      transform: translateX(-50%);
-      background: #333;
-      color: white;
-      padding: 12px 24px;
-      border-radius: 30px;
-      font-size: 0.9rem;
-      z-index: 200;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--ink);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 999px;
+      font-size: 0.86rem;
+      font-weight: 550;
+      z-index: 300;
       opacity: 0;
-      transition: opacity 0.3s;
       pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      max-width: calc(100% - 32px);
+      text-align: center;
+      transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
     }
-    .toast.show { opacity: 1; }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
     .footer-nav {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: rgba(255,255,255,0.96);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border-top: 1px solid var(--border);
       display: flex;
       z-index: 100;
-      padding-bottom: env(safe-area-inset-bottom);
-      box-shadow: 0 -4px 20px rgba(0,0,0,0.04);
+      padding: 6px 4px calc(6px + var(--safe-bottom));
     }
     .footer-nav button {
       flex: 1;
-      padding: 10px 2px 8px;
+      padding: 6px 2px 4px;
       border: none;
       background: none;
       font-size: 0.62rem;
-      color: var(--muted);
+      color: var(--subtle);
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 3px;
-      font-weight: 500;
+      font-weight: 600;
       letter-spacing: 0.02em;
+      font-family: inherit;
+      min-height: 52px;
     }
-    .footer-nav button.active { color: var(--primary); font-weight: 700; }
-    .footer-nav .icon { font-size: 1.3rem; }
+    .footer-nav button.active { color: var(--primary); }
+    .footer-nav .nav-ico {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .footer-nav button.active .nav-ico { fill: rgba(230,0,18,0.08); }
+
     .badge {
       display: inline-block;
       background: var(--primary);
       color: white;
       font-size: 0.7rem;
-      padding: 2px 6px;
-      border-radius: 10px;
+      padding: 2px 7px;
+      border-radius: 999px;
       margin-left: 4px;
     }
-    .store-select-wrap {
-      position: relative;
+    .sync-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: #F7F7F8;
+      border-radius: var(--radius-sm);
     }
-    .filter-input {
-      margin-bottom: 8px;
+    .sync-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--subtle);
+      flex-shrink: 0;
+    }
+    .sync-dot.ok { background: var(--success); }
+    .sync-dot.warn { background: var(--warning); }
+    .sync-dot.err { background: var(--danger); }
+
+    .install-banner {
+      margin: 12px 16px 0;
+      background: var(--primary-soft);
+      border: 1px solid rgba(230,0,18,0.16);
+    }
+
+    .route-day-btn.active {
+      background: var(--primary) !important;
+      color: #fff !important;
+      border-color: var(--primary) !important;
+    }
+
+    details summary { cursor: pointer; color: var(--primary); font-weight: 650; }
+    pre {
+      white-space: pre-wrap;
+      background: #F4F4F6;
+      padding: 10px;
+      border-radius: var(--radius-sm);
+      font-size: 0.7rem;
+      overflow: auto;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition: none !important;
+        animation: none !important;
+      }
     }
   </style>
+
 </head>
 <body>
   <header>
@@ -424,20 +643,18 @@
         </svg>
         <div>
           <h1>存貨管理</h1>
-          <div class="subtitle">香港益力多 · 每日落貨記錄</div>
+          <div class="subtitle">香港益力多　每日落貨</div>
         </div>
       </div>
       <img class="yakult-brand-logo" src="./yakult_logo.png" alt="Yakult 益力多" onerror="this.style.display='none'">
     </div>
   </header>
 
-  <div id="installBanner" class="card" style="display:none; margin:12px; background:#fff5f5; border:1px solid #ffc9c9;">
-    <div style="font-weight:600; color:var(--primary); margin-bottom:6px;">📲 加到手機主畫面</div>
-    <div style="font-size:0.85rem; color:var(--muted); margin-bottom:10px;">
-      安裝後可像 App 一樣使用，圖標為益力多樽。
-    </div>
+  <div id="installBanner" class="card install-banner" style="display:none;">
+    <div class="card-title">加到主畫面</div>
+    <p class="hint">安裝後可像 App 一樣離線使用。</p>
     <button class="btn btn-primary" id="btnInstall" style="display:none;" onclick="triggerInstall()">立即安裝</button>
-    <div id="installHint" style="font-size:0.8rem; color:var(--muted);"></div>
+    <div id="installHint" class="hint" style="margin-top:8px;margin-bottom:0;"></div>
   </div>
 
 
@@ -445,7 +662,7 @@
     <!-- 今日記錄頁 -->
     <div id="page-today">
       <div class="card">
-        <div class="card-title">選擇店舖</div>
+        <div class="card-title">到店記錄</div>
         <div style="margin-bottom:8px;">
           <label>店號搜尋</label>
           <input type="text" id="storeSearch" inputmode="numeric" pattern="[0-9]*" enterkeyhint="search" placeholder="輸入店號" autocomplete="off" oninput="filterStoreSelect()">
@@ -459,7 +676,7 @@
           <label>日期</label>
           <input type="date" id="recordDate">
         </div>
-        <div id="recordSyncStatus" style="font-size:0.78rem;color:var(--muted);margin-top:8px;line-height:1.4;"></div>
+        <div id="recordSyncStatus" class="sync-pill"></div>
       </div>
 
       <div id="productsArea" class="hidden">
@@ -485,7 +702,13 @@
       </div>
 
       <div id="noStoreMsg" class="card">
-        <div class="empty">請先選擇店舖開始記錄</div>
+        <div class="empty">
+          <svg class="empty-illust" viewBox="0 0 48 48" fill="none" stroke="#E60012" stroke-width="1.8">
+            <rect x="10" y="8" width="28" height="34" rx="4"/>
+            <path d="M16 18h16M16 24h12M16 30h8"/>
+          </svg>
+          請先選擇店舖開始記錄
+        </div>
       </div>
     </div>
 
@@ -519,22 +742,22 @@
     <!-- 行程表 -->
     <div id="page-route" class="hidden">
       <div class="card">
-        <div class="card-title">週行程表</div>
+        <div class="card-title">週行程</div>
         <div style="margin-bottom:12px;">
           <label>地區</label>
           <select id="routeRegionSelect" onchange="onRouteRegionSelectChange()"></select>
         </div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;" id="routeDayTabs">
-          <button type="button" class="btn btn-secondary route-day-btn" data-day="1" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(1)">一</button>
-          <button type="button" class="btn btn-secondary route-day-btn" data-day="2" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(2)">二</button>
-          <button type="button" class="btn btn-secondary route-day-btn" data-day="3" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(3)">三</button>
-          <button type="button" class="btn btn-secondary route-day-btn" data-day="4" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(4)">四</button>
-          <button type="button" class="btn btn-secondary route-day-btn" data-day="5" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(5)">五</button>
-          <button type="button" class="btn btn-secondary route-day-btn" data-day="6" style="width:auto;padding:8px 10px;font-size:0.8rem;" onclick="selectRouteDay(6)">六</button>
+          <button type="button" class="chip route-day-btn" data-day="1" onclick="selectRouteDay(1)">一</button>
+          <button type="button" class="chip route-day-btn" data-day="2" onclick="selectRouteDay(2)">二</button>
+          <button type="button" class="chip route-day-btn" data-day="3" onclick="selectRouteDay(3)">三</button>
+          <button type="button" class="chip route-day-btn" data-day="4" onclick="selectRouteDay(4)">四</button>
+          <button type="button" class="chip route-day-btn" data-day="5" onclick="selectRouteDay(5)">五</button>
+          <button type="button" class="chip route-day-btn" data-day="6" onclick="selectRouteDay(6)">六</button>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
           <div id="routeDayTitle" style="font-weight:700;color:var(--primary);"></div>
-          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#2e7d32;" onclick="openRouteMapView()">🗺️ 地圖</button>
+          <button type="button" class="btn btn-secondary btn-compact" onclick="openRouteMapView()">地圖</button>
         </div>
         <div id="routeList" style="font-size:0.85rem;margin-bottom:12px;"></div>
         <div id="routeSelectedBar" style="display:none;border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px;">
@@ -547,12 +770,12 @@
         <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" id="routeAddCustomName" placeholder="輸入戶口名稱後新增" autocomplete="off" style="flex:1;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();addRouteCustom();}">
-            <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">＋ 新增</button>
+            <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">新增</button>
           </div>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#1565c0;" onclick="exportRouteImage()">🖼️ 匯出當日行程長圖</button>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;background:#2e7d32;" onclick="exportAllRouteImages()">🖼️ 匯出一至六行程（一張圖）</button>
-          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRegionRoutesJSON()">💾 匯出本區行程資料</button>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="triggerImportRegionRoutes()">📥 匯入行程資料</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="exportRouteImage()">匯出當日行程長圖</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="exportAllRouteImages()">匯出一至六行程（一張圖）</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRegionRoutesJSON()">匯出本區行程資料</button>
+          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="triggerImportRegionRoutes()">匯入行程資料</button>
           <input type="file" id="routeImportFile" accept="application/json,.json" class="hidden" style="display:none;" onchange="onRouteImportFile(event)">
         </div>
       </div>
@@ -581,7 +804,7 @@
           <div style="font-weight:700;color:var(--primary);font-size:0.95rem;flex:1;min-width:100px;" id="mapRouteTitle">地圖行程</div>
           <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#E60012;" onclick="navToNextStop()">導航</button>
           <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="advanceNextStop()">下一站</button>
-          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#1565c0;" onclick="recenterMyLocation()">📍 我</button>
+          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#1565c0;" onclick="recenterMyLocation()">定位</button>
           <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="closeRouteMapView()">關閉</button>
         </div>
         <div id="mapRouteHint" style="padding:6px 14px;font-size:0.78rem;color:var(--muted);"></div>
@@ -591,78 +814,8 @@
       </div>
     </div>
 
-    <!-- 設定頁 -->
-    <div id="page-tools" class="hidden">
-<div class="card hidden" id="expiryCard" style="display:none !important;">
-        <div class="card-title">📅 出貨到期日（每日每產品輸入一次）</div>
-        <div id="expirySavedList" style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;line-height:1.6;"></div>
-        <div style="margin-bottom:10px;">
-          <label id="expiryDateLabel">適用日期（新輸入）</label>
-          <input type="date" id="expiryDatePicker" onchange="onExpiryDatePickerChange()">
-        </div>
-        <div id="expiryEditBar" class="hidden" style="margin-bottom:8px;">
-          <span id="expiryEditLabel" style="font-size:0.85rem;color:var(--primary);font-weight:600;"></span>
-          <button type="button" class="btn btn-secondary" style="margin-top:6px;padding:8px;" onclick="cancelExpiryEdit()">取消編輯</button>
-        </div>
-        <div id="expiryInputs"></div>
-        <button type="button" class="btn btn-primary hidden" id="btnConfirmExpiry" style="margin-top:10px;" onclick="confirmExpirySave()">確定</button>
-        <div id="expiryHint" style="font-size:0.8rem;color:var(--muted);margin-top:6px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">📅 預計轉價（按集團）</div>
-        <div style="margin-bottom:10px;">
-          <label>生效日期</label>
-          <input type="date" id="scheduleEffectiveDate">
-        </div>
-        <div style="margin-bottom:10px;">
-          <label>集團</label>
-          <select id="scheduleChain" onchange="loadScheduleForm()">
-            <option value="" selected></option>
-            <option value="惠康">惠康</option>
-            <option value="百佳">百佳</option>
-            <option value="一田">一田</option>
-            <option value="Aeon">Aeon</option>
-            <option value="Donki">Donki</option>
-            <option value="佳寶">佳寶</option>
-          </select>
-        </div>
-        <div id="schedulePrices"></div>
-        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
-        <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
-      </div>
-      <div class="card" id="storeDiscountLogCard">
-        <div class="card-title">🏷 全店折扣記錄（參考用）</div>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">
-          記錄全店折扣日（例如全店 88 折）。下次到店時，若該段銷量期間包含折扣，銷量旁將顯示 🏷 標記。
-        </p>
-        <div id="storeDiscountLogList" style="font-size:0.78rem;margin-bottom:10px;"></div>
-        <div style="margin-bottom:8px;">
-          <label>日期</label>
-          <input type="date" id="sdlDate">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>集團</label>
-          <select id="sdlChain">
-            <option value="全部">全部</option>
-            <option value="惠康">惠康</option>
-            <option value="百佳">百佳</option>
-            <option value="一田">一田</option>
-            <option value="Aeon">Aeon</option>
-            <option value="Donki">Donki</option>
-            <option value="佳寶">佳寶</option>
-          </select>
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>折扣</label>
-          <input type="text" id="sdlLabel" placeholder="例如：全店88折 / 全店8折" maxlength="40">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>備註（可選）</label>
-          <input type="text" id="sdlNote" placeholder="可留空" maxlength="80">
-        </div>
-        <button class="btn btn-primary" onclick="addStoreDiscountLog()">加入記錄</button>
-      </div>
-          </div>
+    <!-- 價錢頁已取消 -->
+    <div id="page-tools" class="hidden" style="display:none !important;" aria-hidden="true"></div>
 
     <div id="page-settings" class="hidden">
       <div class="card">
@@ -690,16 +843,16 @@
           <label>報告日期至</label>
           <input type="date" id="reportDateTo">
         </div>
-        <button class="btn btn-primary" style="margin-bottom:10px;background:#1565c0;" onclick="exportBossPDF()">📄 匯出詳細報告（PDF）</button>
+        <button class="btn btn-primary" style="margin-bottom:10px;" onclick="exportBossPDF()">匯出詳細報告（PDF）</button>
         <div id="backupStatus" style="font-size:0.85rem;margin-bottom:10px;padding:8px 10px;border-radius:8px;background:#f5f5f5;color:var(--muted);"></div>
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="exportJSON()">匯出 JSON 備份</button>
         <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="importJSON()">匯入 JSON 備份</button>
         <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
-        <button class="btn" style="background:#dc3545; color:white;" onclick="confirmClearAll()">清除所有資料（含同步設定）</button>
-        <p style="font-size:0.75rem;color:var(--muted);margin-top:6px;">會清空：歷史記錄、店舖清單、預計轉價、草稿、同步設定。方便其他地區重新開始。</p>
+        <button class="btn btn-danger" onclick="confirmClearAll()">清除所有資料（含同步設定）</button>
+        <p style="font-size:0.75rem;color:var(--muted);margin-top:6px;">會清空：歷史記錄、店舖清單、草稿、同步設定。方便其他地區重新開始。</p>
       </div>
       <div class="card">
-        <div class="card-title">🗺️ 地區管理</div>
+        <div class="card-title">地區管理</div>
         <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">可儲存多個地區的店舖清單，隨時切換。切換前會自動儲存目前地區的店舖。</p>
         <div style="margin-bottom:10px;">
           <label>目前地區</label>
@@ -713,7 +866,7 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title">🏪 店舖管理 <span id="storeRegionTag" style="font-weight:400;font-size:0.8rem;color:var(--muted);"></span></div>
+        <div class="card-title">店舖管理 <span id="storeRegionTag" style="font-weight:400;font-size:0.8rem;color:var(--muted);"></span></div>
         <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">以下店舖屬於<strong>目前地區</strong>。新增／刪除只影響此地區。</p>
         <div id="storeManageList" style="font-size:0.82rem;margin-bottom:12px;max-height:260px;overflow-y:auto;"></div>
         <div id="storeProductEditPanel" class="hidden" style="background:#fafafa;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;"></div>
@@ -819,7 +972,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
             <text x="32" y="38" text-anchor="middle" font-size="10" font-weight="700" fill="#E21530" font-family="Arial,sans-serif">Y</text>
           </svg>
           <div>
-            <div style="font-weight:700; color:var(--primary);">存貨管理 v3.0</div>
+            <div style="font-weight:700; color:var(--primary);">存貨管理 v3.1</div>
             <div style="font-size:0.85rem; color:var(--muted);">香港益力多乳品有限公司風格 · 每日超市落貨</div>
           </div>
         </div>
@@ -835,23 +988,19 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
   <div class="footer-nav">
     <button id="nav-today" class="active" onclick="showPage('today')">
-      <span class="icon">📝</span>
+      <svg class="nav-ico" viewBox="0 0 24 24"><path d="M8 4h8M7 7h10v13H7z"/><path d="M10 11h4M10 15h3"/></svg>
       <span>記錄</span>
     </button>
     <button id="nav-history" onclick="showPage('history')">
-      <span class="icon">📋</span>
+      <svg class="nav-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>
       <span>歷史</span>
     </button>
-    <button id="nav-tools" onclick="showPage('tools')">
-      <span class="icon">🏷️</span>
-      <span>價錢</span>
-    </button>
     <button id="nav-route" onclick="showPage('route')">
-      <span class="icon">📅</span>
+      <svg class="nav-ico" viewBox="0 0 24 24"><path d="M6 19V7a3 3 0 016 0v10a3 3 0 006 0V8"/><circle cx="6" cy="19" r="1.6"/><circle cx="18" cy="8" r="1.6"/></svg>
       <span>行程</span>
     </button>
     <button id="nav-settings" onclick="showPage('settings')">
-      <span class="icon">⚙️</span>
+      <svg class="nav-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 4.5v1.8M12 17.7V19.5M4.5 12h1.8M17.7 12H19.5M6.6 6.6l1.3 1.3M16.1 16.1l1.3 1.3M17.4 6.6l-1.3 1.3M7.9 16.1l-1.3 1.3"/></svg>
       <span>設定</span>
     </button>
   </div>
@@ -2588,6 +2737,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     function loadScheduleForm() {
+      if (!$('scheduleChain') || !$('schedulePrices')) return;
       const chain = $('scheduleChain').value;
       if (!chain) {
         if ($('scheduleEffectiveDate')) $('scheduleEffectiveDate').value = '';
@@ -2752,6 +2902,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     }
 
     function renderScheduleSummary() {
+      if (!$('scheduleSummary')) return;
       pruneExpiredSchedules();
       const data = loadScheduleData();
       const chains = Object.keys(data);
@@ -3179,23 +3330,21 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       const stockBlock = `
-        <div class="card" style="margin-bottom:12px;padding:12px;">
-          <div class="card-title" style="margin-bottom:8px;">① 點存貨</div>
-          <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">到店先記各產品現有存貨；按 Enter 跳至下一產品。</p>
+        <div class="card">
+          <div class="card-title"><span class="step-label"><span class="step-num">1</span>點存貨</span></div>
+          <p class="hint">到店先記現有存貨，Enter 跳至下一產品。</p>
           ${prods.map(p => `
-            <div class="product-card" id="prod-stock-${p.id}" style="margin-bottom:10px;">
-              <div class="product-name">${p.name}
-                <span style="font-weight:400;font-size:0.8rem;color:var(--muted);margin-left:6px;" id="priceDisplay-${p.id}">—</span>
-              </div>
+            <div class="product-card" id="prod-stock-${p.id}">
+              <div class="product-name">${p.name}</div>
               <div class="info-row">
                 <span class="label">上次存貨</span>
                 <span class="value" id="last-${p.id}">—</span>
               </div>
-              <div style="margin-top:6px;">
+              <div>
                 <label>今次存貨（${isBottleUnit(p.id) ? '支' : '排'}）</label>
                 <input type="number" class="stock-input" id="stock-${p.id}" min="0" step="1" inputmode="numeric" enterkeyhint="next" placeholder="" oninput="calcSuggest('${p.id}')">
               </div>
-              <div class="info-row" style="margin-top:6px;">
+              <div class="info-row" style="margin-top:8px;margin-bottom:0;">
                 <span class="label">銷量</span>
                 <span class="sold" id="sold-${p.id}">—</span>
               </div>
@@ -3204,16 +3353,14 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           `).join('')}
         </div>`;
       const orderBlock = `
-        <div class="card" style="margin-bottom:12px;padding:12px;">
-          <div class="card-title" style="margin-bottom:8px;">② 決定落貨</div>
-          <p style="font-size:0.8rem;color:var(--muted);margin:0 0 10px;">存貨記完後填寫落貨；最後一欄按 Enter 可儲存。</p>
+        <div class="card">
+          <div class="card-title"><span class="step-label"><span class="step-num">2</span>落貨</span></div>
+          <p class="hint">填完存貨後輸入落貨，最後一欄 Enter 即儲存。</p>
           ${prods.map(p => `
-            <div class="product-card" id="prod-order-${p.id}" style="margin-bottom:10px;">
+            <div class="product-card" id="prod-order-${p.id}">
               <div class="product-name">${p.name}</div>
-              <div style="margin-top:6px;">
-                <label>實際落貨（${isBottleUnit(p.id) ? '支' : '排'}）</label>
-                <input type="number" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="">
-              </div>
+              <label>實際落貨（${isBottleUnit(p.id) ? '支' : '排'}）</label>
+              <input type="number" class="stock-input" id="order-${p.id}" min="0" step="1" inputmode="numeric" placeholder="">
             </div>
           `).join('')}
         </div>`;
@@ -4729,10 +4876,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
               '<span class="history-date">' + r.date + '</span>' +
             '</div>' +
             '<div class="history-detail">' + table + '</div>' +
-            '<div style="margin-top:8px;">' +
-              (hasAny ? '<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="toggleHistPrices(\'' + histKey + '\', this)">顯示價錢</button> ' : '') +
-              '<button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem; width:auto;" onclick="loadRecordToForm(\'' + r.storeId + '\',\'' + r.date + '\')">載入修改</button>' +
-              '<button class="btn" style="padding:6px 12px; font-size:0.85rem; width:auto; background:#dc3545; color:white; margin-left:6px;" onclick="deleteRecord(\'' + r.storeId + '\',\'' + r.date + '\')">刪除</button>' +
+            '<div class="hist-actions">' +
+              '<button class="btn btn-secondary btn-compact" onclick="loadRecordToForm(\'' + r.storeId + '\',\'' + r.date + '\')">載入修改</button>' +
+              '<button class="btn btn-danger btn-compact" onclick="deleteRecord(\'' + r.storeId + '\',\'' + r.date + '\')">刪除</button>' +
             '</div>' +
           '</div>'
         );
@@ -5977,13 +6123,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       _routeSelectedIdx = -1;
       document.querySelectorAll('.route-day-btn').forEach(function (btn) {
         const d = parseInt(btn.getAttribute('data-day'), 10);
-        if (d === day) {
-          btn.classList.remove('btn-secondary');
-          btn.classList.add('btn-primary');
-        } else {
-          btn.classList.add('btn-secondary');
-          btn.classList.remove('btn-primary');
-        }
+        btn.classList.toggle('active', d === day);
       });
       if ($('routeDayTitle')) $('routeDayTitle').textContent = '星期' + DAY_NAMES[day] + '（' + (loadRoutes()[day] || []).length + ' 戶）';
       renderRouteList();
@@ -7251,7 +7391,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=12').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js?v=14').then(function (reg) {
         // 每次打開檢查更新，唔使清網站資料
         try { reg.update(); } catch (e) {}
         if (reg.waiting) {
