@@ -1,5 +1,5 @@
 // stock-v12：網絡優先；強制刷新舊快取（一至六行程改為單張合併長圖）
-const CACHE = 'stock-v20';
+const CACHE = 'stock-v22';
 const ASSETS = [
   './',
   './index.html',
