@@ -57,7 +57,7 @@
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      height: 100%;
+      min-height: 100%;
       width: 100%;
       max-width: 100%;
       overflow-x: hidden;
@@ -67,7 +67,7 @@
       background: var(--bg);
       color: var(--ink);
       line-height: 1.5;
-      padding-bottom: calc(120px + var(--safe-bottom));
+      padding-bottom: calc(88px + var(--safe-bottom));
       letter-spacing: 0.01em;
       -webkit-font-smoothing: antialiased;
       -webkit-tap-highlight-color: transparent;
@@ -295,13 +295,19 @@
       border-radius: var(--radius-sm);
     }
 
-    .step-label {
-      display: inline-flex;
+    .form-section { margin: 2px 0 16px; }
+    .section-title {
+      display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 0.78rem;
+      font-size: 0.95rem;
       font-weight: 700;
-      letter-spacing: 0.06em;
+      margin: 2px 0 8px;
+    }
+    .hist-scroll {
+      overflow-x: auto;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
     }
     .step-num {
       width: 22px;
@@ -618,7 +624,7 @@
     .sync-dot.err { background: var(--danger); }
 
     .install-banner {
-      margin: 12px 16px 0;
+      margin: 0 0 14px;
       background: var(--primary-soft);
       border: 1px solid rgba(230,0,18,0.16);
     }
@@ -668,15 +674,14 @@
     </div>
   </header>
 
-  <div id="installBanner" class="card install-banner" style="display:none;">
-    <div class="card-title">加到主畫面</div>
-    <p class="hint">安裝後可像 App 一樣離線使用。</p>
-    <button class="btn btn-primary" id="btnInstall" style="display:none;" onclick="triggerInstall()">立即安裝</button>
-    <div id="installHint" class="hint" style="margin-top:8px;margin-bottom:0;"></div>
-  </div>
-
-
   <div class="container">
+    <div id="installBanner" class="card install-banner" style="display:none;">
+      <div class="card-title">加到主畫面</div>
+      <p class="hint">安裝後可像 App 一樣離線使用。</p>
+      <button class="btn btn-primary" id="btnInstall" style="display:none;" onclick="triggerInstall()">立即安裝</button>
+      <div id="installHint" class="hint" style="margin-top:8px;margin-bottom:0;"></div>
+    </div>
+
     <!-- 今日記錄頁 -->
     <div id="page-today">
       <div class="card">
@@ -746,7 +751,7 @@
             <input type="date" id="historyDateFilter" onchange="renderHistory()">
           </div>
         </div>
-        <div class="btn-group" style="margin-top:8px;">
+        <div style="margin-top:8px;">
           <button class="btn btn-secondary" onclick="clearHistoryFilters()">清除篩選</button>
         </div>
       </div>
@@ -757,135 +762,8 @@
       </div>
     </div>
 
-    <!-- 行程表 -->
-    <div id="page-route" class="hidden">
-      <div class="card">
-        <div class="card-title">週行程</div>
-        <div style="margin-bottom:12px;">
-          <label>地區</label>
-          <select id="routeRegionSelect" onchange="onRouteRegionSelectChange()"></select>
-        </div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;" id="routeDayTabs">
-          <button type="button" class="chip route-day-btn" data-day="1" onclick="selectRouteDay(1)">一</button>
-          <button type="button" class="chip route-day-btn" data-day="2" onclick="selectRouteDay(2)">二</button>
-          <button type="button" class="chip route-day-btn" data-day="3" onclick="selectRouteDay(3)">三</button>
-          <button type="button" class="chip route-day-btn" data-day="4" onclick="selectRouteDay(4)">四</button>
-          <button type="button" class="chip route-day-btn" data-day="5" onclick="selectRouteDay(5)">五</button>
-          <button type="button" class="chip route-day-btn" data-day="6" onclick="selectRouteDay(6)">六</button>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
-          <div id="routeDayTitle" style="font-weight:700;color:var(--primary);"></div>
-          <button type="button" class="btn btn-secondary btn-compact" onclick="openRouteMapView()">地圖</button>
-        </div>
-        <div id="routeList" style="font-size:0.85rem;margin-bottom:12px;"></div>
-        <div id="routeSelectedBar" style="display:none;border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px;">
-          <div id="routeSelectedLabel" style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;"></div>
-          <div style="display:flex;gap:8px;">
-            <button type="button" class="btn btn-secondary" style="flex:1;" onclick="editSelectedRouteItem()">修改名稱</button>
-            <button type="button" class="btn" style="flex:1;background:#dc3545;color:#fff;" onclick="removeSelectedRouteItem()">刪除</button>
-          </div>
-        </div>
-        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
-          <div style="display:flex;gap:8px;align-items:center;">
-            <input type="text" id="routeAddCustomName" placeholder="輸入戶口名稱後新增" autocomplete="off" style="flex:1;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();addRouteCustom();}">
-            <button type="button" class="btn btn-primary" style="width:auto;padding:10px 14px;flex-shrink:0;" onclick="addRouteCustom()">新增</button>
-          </div>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="exportRouteImage()">匯出當日行程長圖</button>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="exportAllRouteImages()">匯出一至六行程（一張圖）</button>
-          <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="exportRegionRoutesJSON()">匯出本區行程資料</button>
-          <button type="button" class="btn btn-primary" style="margin-top:10px;" onclick="triggerImportRegionRoutes()">匯入行程資料</button>
-          <input type="file" id="routeImportFile" accept="application/json,.json" class="hidden" style="display:none;" onchange="onRouteImportFile(event)">
-        </div>
-      </div>
-    </div>
-
-    <!-- 地圖選點 -->
-    <div id="mapPickModal" class="hidden" style="position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.45);display:none;flex-direction:column;">
-      <div style="background:#fff;margin:auto 0 0;border-radius:16px 16px 0 0;max-height:92vh;display:flex;flex-direction:column;width:100%;">
-        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;">
-          <div style="font-weight:700;color:var(--primary);font-size:0.95rem;" id="mapPickTitle">地圖選點</div>
-          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:0.85rem;" onclick="closeMapPick()">關閉</button>
-        </div>
-        <div style="padding:8px 14px;font-size:0.8rem;color:var(--muted);">點擊地圖設定位置，可拖動標記微調。</div>
-        <div id="mapPickCanvas" style="height:48vh;min-height:260px;width:100%;"></div>
-        <div style="padding:12px 14px;display:flex;gap:8px;">
-          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeMapPick()">取消</button>
-          <button type="button" class="btn btn-primary" style="flex:1;" onclick="confirmMapPick()">確認位置</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 地圖看行程 -->
-    <div id="mapRouteModal" class="hidden" style="position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.45);display:none;flex-direction:column;">
-      <div style="background:#fff;margin:auto 0 0;border-radius:16px 16px 0 0;max-height:94vh;display:flex;flex-direction:column;width:100%;">
-        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;gap:6px;flex-wrap:wrap;">
-          <div style="font-weight:700;color:var(--primary);font-size:0.95rem;flex:1;min-width:100px;" id="mapRouteTitle">地圖行程</div>
-          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#E60012;" onclick="navToNextStop()">導航</button>
-          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="advanceNextStop()">下一站</button>
-          <button type="button" class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:0.78rem;background:#1565c0;" onclick="recenterMyLocation()">定位</button>
-          <button type="button" class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:0.78rem;" onclick="closeRouteMapView()">關閉</button>
-        </div>
-        <div id="mapRouteHint" style="padding:6px 14px;font-size:0.78rem;color:var(--muted);"></div>
-        <div id="mapRouteNext" style="padding:0 14px 6px;font-size:0.88rem;font-weight:600;color:var(--primary);"></div>
-        <div id="mapRouteCanvas" style="height:50vh;min-height:260px;width:100%;"></div>
-        <div id="mapRouteLegend" style="padding:10px 14px;max-height:22vh;overflow-y:auto;font-size:0.8rem;border-top:1px solid #eee;"></div>
-      </div>
-    </div>
-
-    <!-- 價錢 -->
-    <div id="page-tools" class="hidden">
-      <div class="card">
-        <div class="card-title">預計轉價</div>
-        <div style="margin-bottom:10px;">
-          <label>生效日期</label>
-          <input type="date" id="scheduleEffectiveDate">
-        </div>
-        <div style="margin-bottom:10px;">
-          <label>集團</label>
-          <select id="scheduleChain" onchange="loadScheduleForm()">
-            <option value="" selected></option>
-            <option value="惠康">惠康</option>
-            <option value="百佳">百佳</option>
-            <option value="一田">一田</option>
-            <option value="Aeon">Aeon</option>
-            <option value="Donki">Donki</option>
-            <option value="佳寶">佳寶</option>
-          </select>
-        </div>
-        <div id="schedulePrices"></div>
-        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveSchedule()">儲存此集團預計轉價</button>
-        <div id="scheduleSummary" style="margin-top:12px; font-size:0.85rem; color:var(--muted);"></div>
-      </div>
-      <div class="card" id="storeDiscountLogCard">
-        <div class="card-title">全店折扣記錄</div>
-        <div id="storeDiscountLogList" style="font-size:0.78rem;margin-bottom:10px;"></div>
-        <div style="margin-bottom:8px;">
-          <label>日期</label>
-          <input type="date" id="sdlDate">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>集團</label>
-          <select id="sdlChain">
-            <option value="全部">全部</option>
-            <option value="惠康">惠康</option>
-            <option value="百佳">百佳</option>
-            <option value="一田">一田</option>
-            <option value="Aeon">Aeon</option>
-            <option value="Donki">Donki</option>
-            <option value="佳寶">佳寶</option>
-          </select>
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>折扣</label>
-          <input type="text" id="sdlLabel" placeholder="例如：全店88折 / 全店8折" maxlength="40">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label>備註（可選）</label>
-          <input type="text" id="sdlNote" placeholder="可留空" maxlength="80">
-        </div>
-        <button class="btn btn-primary" onclick="addStoreDiscountLog()">加入記錄</button>
-      </div>
-    </div>
+    <!-- 價錢頁已取消 -->
+    <div id="page-tools" class="hidden" style="display:none !important;" aria-hidden="true"></div>
 
     <div id="page-settings" class="hidden">
       <div class="card">
@@ -1064,14 +942,6 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     <button id="nav-history" onclick="showPage('history')">
       <svg class="nav-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>
       <span>歷史</span>
-    </button>
-    <button id="nav-tools" onclick="showPage('tools')">
-      <svg class="nav-ico" viewBox="0 0 24 24"><path d="M4 8h10l6 4-6 4H4z"/></svg>
-      <span>價錢</span>
-    </button>
-    <button id="nav-route" onclick="showPage('route')">
-      <svg class="nav-ico" viewBox="0 0 24 24"><path d="M6 19V7a3 3 0 016 0v10a3 3 0 006 0V8"/><circle cx="6" cy="19" r="1.6"/><circle cx="18" cy="8" r="1.6"/></svg>
-      <span>行程</span>
     </button>
     <button id="nav-settings" onclick="showPage('settings')">
       <svg class="nav-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 4.5v1.8M12 17.7V19.5M4.5 12h1.8M17.7 12H19.5M6.6 6.6l1.3 1.3M16.1 16.1l1.3 1.3M17.4 6.6l-1.3 1.3M7.9 16.1l-1.3 1.3"/></svg>
@@ -3404,8 +3274,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         return;
       }
       const stockBlock = `
-        <div class="card">
-          <div class="card-title"><span class="step-label"><span class="step-num">1</span>點存貨</span></div>
+        <div class="form-section">
+          <div class="section-title"><span class="step-num">1</span>點存貨</div>
           <p class="hint">到店先記現有存貨，Enter 跳至下一產品。</p>
           ${prods.map(p => `
             <div class="product-card" id="prod-stock-${p.id}">
@@ -3427,8 +3297,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
           `).join('')}
         </div>`;
       const orderBlock = `
-        <div class="card">
-          <div class="card-title"><span class="step-label"><span class="step-num">2</span>落貨</span></div>
+        <div class="form-section">
+          <div class="section-title"><span class="step-num">2</span>落貨</div>
           <p class="hint">填完存貨後輸入落貨，最後一欄 Enter 即儲存。</p>
           ${prods.map(p => `
             <div class="product-card" id="prod-order-${p.id}">
@@ -4930,15 +4800,14 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
         const histKey = (r.storeId + '_' + r.date).replace(/[^a-zA-Z0-9_\-]/g, '_');
         let table = '';
         if (hasAny && histProds.length) {
-          table = '<table class="hist-table"><thead><tr><th></th>' +
+          table = '<div class="hist-scroll"><table class="hist-table"><thead><tr><th></th>' +
             histProds.map(p => '<th>' + productShortCode(p.id) + '</th>').join('') +
             '</tr></thead><tbody>' +
             '<tr><td class="row-label">銷量</td>' + salesArr.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">存貨</td>' + stocks.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr><td class="row-label">落貨</td>' + orders.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
             '<tr class="total-row"><td class="row-label">合計</td>' + totals.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
-            '<tr id="histPriceRow_' + histKey + '" class="hidden"><td class="row-label">價錢</td>' + prices.map(v => '<td>' + v + '</td>').join('') + '</tr>' +
-            '</tbody></table>';
+            '</tbody></table></div>';
         } else {
           table = '（無詳細資料）';
         }
@@ -7465,7 +7334,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=16').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js?v=18').then(function (reg) {
         // 每次打開檢查更新，唔使清網站資料
         try { reg.update(); } catch (e) {}
         if (reg.waiting) {
