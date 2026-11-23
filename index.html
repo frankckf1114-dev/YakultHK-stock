@@ -587,16 +587,22 @@
     }
 
     .empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       text-align: center;
-      padding: 36px 16px;
+      gap: 10px;
+      padding: 28px 16px 24px;
       color: var(--muted);
       font-size: 0.9rem;
     }
     .empty-illust {
-      width: 48px;
-      height: 48px;
-      margin: 0 auto 12px;
-      opacity: 0.55;
+      display: block;
+      width: 40px;
+      height: 40px;
+      margin: 0;
+      opacity: 0.7;
     }
 
     .toast {
@@ -811,7 +817,7 @@
             <rect x="10" y="8" width="28" height="34" rx="4"/>
             <path d="M16 18h16M16 24h12M16 30h8"/>
           </svg>
-          請先選擇店舖開始記錄
+          <span>請先選擇店舖開始記錄</span>
         </div>
       </div>
     </div>
@@ -5415,12 +5421,12 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       // 摘要表欄位：店舖／集團／到店 → 各產品銷量 → 各產品落貨 → 合計銷量／落貨 → 前月比／前年比
       let sumHead = '<tr><th>店舖</th><th>集團</th><th>到店</th>';
       reportProducts.forEach(p => {
-        sumHead += '<th>' + productShortCode(p.id) + '銷量</th>';
+        sumHead += '<th>' + productShortCode(p.id) + '銷量(支)</th>';
       });
       reportProducts.forEach(p => {
-        sumHead += '<th>' + productShortCode(p.id) + '落貨</th>';
+        sumHead += '<th>' + productShortCode(p.id) + '落貨(支)</th>';
       });
-      sumHead += '<th>合計銷量</th><th>合計落貨</th><th>前月比</th><th>前年比</th></tr>';
+      sumHead += '<th>合計銷量(支)</th><th>合計落貨(支)</th><th>前月比</th><th>前年比</th></tr>';
 
       let sumBody = '';
       let grandSales = 0, grandOrder = 0, grandMom = 0, grandYoy = 0;
@@ -5542,9 +5548,9 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
       let dailyHead = '<tr><th>日期</th><th>店舖</th><th>集團</th>';
       reportProducts.forEach(function (p) {
         const c = productShortCode(p.id);
-        dailyHead += '<th>' + c + '落貨</th><th>' + c + '銷量</th>';
+        dailyHead += '<th>' + c + '落貨(支)</th><th>' + c + '銷量(支)</th>';
       });
-      dailyHead += '<th>合計落貨</th><th>合計銷量</th></tr>';
+      dailyHead += '<th>合計落貨(支)</th><th>合計銷量(支)</th></tr>';
       let dailyBody = '';
       dailyRows.forEach(function (row) {
         dailyBody += '<tr>';
@@ -5614,7 +5620,8 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
   </div>
   <h1>益力多存貨 · 詳細銷售報告</h1>
   <div class="meta">
-    期間：${escapeXml(period)}　·　產生時間：${escapeXml(genTime)}　·　共 ${storeIds.length} 間店
+    期間：${escapeXml(period)}　·　產生時間：${escapeXml(genTime)}　·　共 ${storeIds.length} 間店<br>
+    數量一律以支計算：五支裝、LT、青提每排 5 支；十支裝每排 10 支。不含 Joie、Y1000。
   </div>
 
   <div class="kpi">
@@ -5626,26 +5633,26 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
     <div class="card"><div class="t">前年比</div><div class="v">${escapeXml(yoyPctAll)}</div><div class="s">同期對比</div></div>
   </div>
 
-  <h2>產品合計</h2>
+  <h2>產品合計（支）</h2>
   <table>
     <thead>${prodSumHead}</thead>
     <tbody>${prodSalesRow}${prodOrderRow}</tbody>
   </table>
 
-  <h2>店舖銷售摘要</h2>
+  <h2>店舖銷售摘要（支）</h2>
   <table>
     <thead>${sumHead}</thead>
     <tbody>${sumBody}</tbody>
   </table>
 
-  <h2>每日落貨／銷量明細</h2>
-  <p class="note">按到店日列出每間店各產品落貨、銷量（銷量＝相對上次到店）。</p>
+  <h2>每日落貨／銷量明細（支）</h2>
+  <p class="note">按到店日列出。落貨、銷量、合計都是支數（Y5／LT／MU ×5，Y10 ×10）。銷量＝上次總存 − 今次現存，再換算成支。</p>
   <table>
     <thead>${dailyHead}</thead>
     <tbody>${dailyBody}</tbody>
   </table>
 
-  <p class="note">單位：支。只計 Y5、Y10、LT、MU（Y5/LT/MU×5，Y10×10）。不含 Joie、Y1000。銷量＝上次總存−今次現存。</p>
+  <p class="note">單位：支。Y5、LT、MU 一排＝5 支；Y10 一排＝10 支。不含 Joie、Y1000。</p>
   <p class="note">${escapeXml(cmpNote)}</p>
   <p class="note">本報告由「存貨管理」App 自動產生，僅供內部參考。</p>
 </body>
@@ -7376,7 +7383,7 @@ grant select, insert, update on table inventory_sync to anon, authenticated;</pr
 
     // Service Worker（正式檔案，滿足 Chrome「安裝應用程式」條件）
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=22').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js?v=24').then(function (reg) {
         // 每次打開檢查更新，唔使清網站資料
         try { reg.update(); } catch (e) {}
         if (reg.waiting) {
